@@ -30,20 +30,23 @@
 #include <stdio.h>
 #include "plugin.h"
 
+const char* MAGNET_PLUGIN_NAME = "MagnetPlugin";
+const char* MAGNET_PLUGIN_DESC = "MagnetPlugin for doing magnet communications in the browser";
+
 NPError NPP_GetValue(NPP instance, NPPVariable variable, void* value) {
   switch(variable) {
   default:
     return NPERR_GENERIC_ERROR;
   case NPPVpluginNameString:
-    *((char **)value) = "ScreenCapturePlugin";
+    *((char **)value) = const_cast<char*>(MAGNET_PLUGIN_NAME);
     break;
   case NPPVpluginDescriptionString:
-    *((char **)value) = "ScreenCapturePlugin plugin.";
+    *((char **)value) = const_cast<char*>(MAGNET_PLUGIN_DESC);
     break;
   case NPPVpluginScriptableNPObject: {
       if(instance == NULL)
         return NPERR_INVALID_INSTANCE_ERROR;
-      CPlugin * pPlugin = (CPlugin *)instance->pdata;
+      MagnetPlugin * pPlugin = (MagnetPlugin *)instance->pdata;
       if(pPlugin == NULL)
         return NPERR_GENERIC_ERROR;
       *(NPObject **)value = (NPObject*)pPlugin->GetScriptableObject();
@@ -67,9 +70,9 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance,
 #else
   int bWindowed = 0;
 #endif
-  npnfuncs->setvalue(instance, NPPVpluginWindowBool, (void *)bWindowed);
+  npnfuncs->setvalue(instance, NPPVpluginWindowBool, (void *)(size_t)bWindowed);
 
-  CPlugin * pPlugin = new CPlugin(instance);
+  MagnetPlugin * pPlugin = new MagnetPlugin(instance);
   if(pPlugin == NULL)
     return NPERR_OUT_OF_MEMORY_ERROR;
 
@@ -82,7 +85,7 @@ NPError NPP_Destroy(NPP instance, NPSavedData** save) {
   if(instance == NULL)
     return NPERR_INVALID_INSTANCE_ERROR;
 
-  CPlugin * pPlugin = (CPlugin *)instance->pdata;
+  MagnetPlugin * pPlugin = (MagnetPlugin *)instance->pdata;
   if(pPlugin != NULL)
     delete pPlugin;
   return NPERR_NO_ERROR;
@@ -95,7 +98,7 @@ NPError NPP_SetWindow(NPP instance, NPWindow* window) {
   if(window == NULL)
     return NPERR_GENERIC_ERROR;
 
-  CPlugin * pPlugin = (CPlugin *)instance->pdata;
+  MagnetPlugin * pPlugin = (MagnetPlugin *)instance->pdata;
   if(pPlugin == NULL) 
     return NPERR_GENERIC_ERROR;
 

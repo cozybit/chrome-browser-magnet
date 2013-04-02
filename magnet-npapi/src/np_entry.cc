@@ -102,8 +102,10 @@ NPError  OSCALL NP_Shutdown() {
   return NPERR_NO_ERROR;
 }
 
+const char* MIME_TYPE_STRING = "application/x-helloworld::Hello World Sample";
+
 char* NP_GetMIMEDescription(void) {
-  return "application/x-helloworld::Hello World Sample";
+  return (char*) MIME_TYPE_STRING;
 }
 
 // Needs to be present for WebKit based browsers.

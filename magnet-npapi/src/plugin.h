@@ -42,11 +42,21 @@
 #include "npruntime.h"
 #include "npfunctions.h"
 
+#include <string>
+
 extern NPNetscapeFuncs* npnfuncs;
 
-class ScriptablePluginObject: NPObject {
+class MagnetPlugin;
+class ScriptablePluginObjectPrivate;
+
+class ScriptablePluginObject : NPObject
+{
 public:
   ScriptablePluginObject(NPP instance);
+  virtual ~ScriptablePluginObject();
+
+  void SetPlugin(MagnetPlugin* plugin);
+
   static NPObject* Allocate(NPP instance, NPClass* npclass);
   static void Deallocate(NPObject* obj);
   static bool HasMethod(NPObject* obj, NPIdentifier methodName);
@@ -59,28 +69,34 @@ public:
   static bool GetProperty(NPObject* obj, NPIdentifier propertyName,
                           NPVariant* result);
 
-  NPP npp;
+private:
+  ScriptablePluginObjectPrivate* d;
 };
 
-class CPlugin {
+class MagnetPluginPrivate;
+
+class MagnetPlugin
+{
 private:
-  NPP m_pNPInstance;
-  NPWindow * m_Window;
-  NPBool m_bInitialized;
-  ScriptablePluginObject *m_pScriptableObject;
-#ifdef _WINDOWS
-  HWND m_hWnd; 
-#endif
+    MagnetPluginPrivate* d;
 
 public:
-  CPlugin(NPP pNPInstance);
-  ~CPlugin();
+    MagnetPlugin(NPP pNPInstance);
+    ~MagnetPlugin();
 
-  NPBool init(NPWindow* pNPWindow);
-  NPBool isInitialized();
-  ScriptablePluginObject *GetScriptableObject();
+    std::string error();
+
+    static bool isListening();
+    static bool isJoined();
+
+    static std::string getMessages();
+
+    NPBool init(NPWindow* pNPWindow);
+    NPBool isInitialized();
+    ScriptablePluginObject *GetScriptableObject();
+
 #ifdef _WINDOWS
-  HWND GetHWnd(); 
+    HWND GetHWnd(); 
 #endif
 };
 
