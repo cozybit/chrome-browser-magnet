@@ -40,6 +40,9 @@
 // CPlugin class implementation
 //
 
+#include <signal.h>
+#include <unistd.h>
+
 #include <string.h>
 #include "plugin.h"
 
@@ -101,7 +104,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
      if (!strcmp(name, kSayHello)) {
 
 	bool succ = true;
-        const char* outString;
+        const char* outString = "Success";
 	if ( ! MagnetInit(TEMP_PATH) )
 	{
 		outString = "MagnetInit() failed";
@@ -114,9 +117,11 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
 		succ = false;
 	}
 
+	sleep(1);
+
 	if ( succ && ! MagnetStop() ) 
 	{
-		outString = "MagnetStart() failed";
+		outString = "MagnetStop() failed";
 		succ = false;
 	}
 
@@ -130,8 +135,11 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
           char* npOutString = (char *)npnfuncs->memalloc(strlen(outString) + 1);
           if (!npOutString)
                return false;
+
           strcpy(npOutString, outString);
           STRINGZ_TO_NPVARIANT(npOutString, *result);
+
+
 
      } else {
           // Exception handling.

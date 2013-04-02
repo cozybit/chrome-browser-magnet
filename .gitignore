@@ -1,7 +1,7 @@
-.*.swp                                                 
-.*~                                                 
-CMakeCache.txt                                                      
-CMakeFiles/                                                         
-Makefile                                                            
-*.cmake                                                 
-src/libnpmagnet.so     
+.*.swp
+.*~
+CMakeCache.txt
+CMakeFiles
+Makefile
+*.cmake
+src/libnpmagnet.so
