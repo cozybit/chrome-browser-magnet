@@ -65,9 +65,25 @@ static NPClass plugin_ref_obj = {
      NULL,
 };
 
-ScriptablePluginObject::ScriptablePluginObject(NPP instance)
-     : npp(instance)
+class ScriptablePluginObjectPrivate
 {
+public:
+    NPP npp; 
+
+    ScriptablePluginObjectPrivate(NPP instance)
+        : npp(instance)
+    {
+    }
+};
+
+ScriptablePluginObject::ScriptablePluginObject(NPP instance)
+     : d(new ScriptablePluginObjectPrivate(instance))
+{
+}
+
+ScriptablePluginObject::~ScriptablePluginObject()
+{
+    delete d;
 }
 
 NPObject* ScriptablePluginObject::Allocate(NPP instance, NPClass* npclass)

@@ -44,9 +44,13 @@
 
 extern NPNetscapeFuncs* npnfuncs;
 
+class ScriptablePluginObjectPrivate;
+
 class ScriptablePluginObject: NPObject {
 public:
   ScriptablePluginObject(NPP instance);
+  virtual ~ScriptablePluginObject();
+
   static NPObject* Allocate(NPP instance, NPClass* npclass);
   static void Deallocate(NPObject* obj);
   static bool HasMethod(NPObject* obj, NPIdentifier methodName);
@@ -58,8 +62,8 @@ public:
   static bool HasProperty(NPObject* obj, NPIdentifier propertyName);
   static bool GetProperty(NPObject* obj, NPIdentifier propertyName,
                           NPVariant* result);
-
-  NPP npp;
+private:
+  ScriptablePluginObjectPrivate* d;
 };
 
 class MagnetPlugin {
