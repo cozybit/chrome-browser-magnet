@@ -46,7 +46,7 @@ NPError NPP_GetValue(NPP instance, NPPVariable variable, void* value) {
   case NPPVpluginScriptableNPObject: {
       if(instance == NULL)
         return NPERR_INVALID_INSTANCE_ERROR;
-      MagnetPlugin * pPlugin = (MagnetPlugin *)instance->pdata;
+      CPlugin* pPlugin = (CPlugin*)instance->pdata;
       if(pPlugin == NULL)
         return NPERR_GENERIC_ERROR;
       *(NPObject **)value = (NPObject*)pPlugin->GetScriptableObject();
@@ -72,7 +72,7 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance,
 #endif
   npnfuncs->setvalue(instance, NPPVpluginWindowBool, (void *)(size_t)bWindowed);
 
-  MagnetPlugin * pPlugin = new MagnetPlugin(instance);
+  CPlugin * pPlugin = new CPlugin(instance);
   if(pPlugin == NULL)
     return NPERR_OUT_OF_MEMORY_ERROR;
 
@@ -85,7 +85,7 @@ NPError NPP_Destroy(NPP instance, NPSavedData** save) {
   if(instance == NULL)
     return NPERR_INVALID_INSTANCE_ERROR;
 
-  MagnetPlugin * pPlugin = (MagnetPlugin *)instance->pdata;
+  CPlugin * pPlugin = (CPlugin *)instance->pdata;
   if(pPlugin != NULL)
     delete pPlugin;
   return NPERR_NO_ERROR;
@@ -98,7 +98,7 @@ NPError NPP_SetWindow(NPP instance, NPWindow* window) {
   if(window == NULL)
     return NPERR_GENERIC_ERROR;
 
-  MagnetPlugin * pPlugin = (MagnetPlugin *)instance->pdata;
+  CPlugin * pPlugin = (CPlugin *)instance->pdata;
   if(pPlugin == NULL) 
     return NPERR_GENERIC_ERROR;
 

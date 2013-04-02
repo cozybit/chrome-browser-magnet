@@ -37,32 +37,18 @@
 
 //////////////////////////////////////////////////
 //
-// MagnetPlugin class implementation
+// CPlugin class implementation
 //
 
 #include <signal.h>
 #include <unistd.h>
+
 #include <string.h>
-#include <stdio.h>
-
-#include <string>
-#include <map>
-
 #include "plugin.h"
 
 #include "Magnet.h"
 
-#define LOG_PRINT_DEBUG(level, application, fmt, ...) fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
-
-const char* METHOD_SAY_HELLO = "sayHello";
-const char* METHOD_IS_INITIALIZED = "isInitialized";
-const char* METHOD_GET_ERROR = "getError";
-const char* METHOD_IS_LISTENING = "isListening";
-const char* METHOD_IS_JOINED = "isJoined";
-const char* METHOD_GET_MESSAGES = "getMessages";
-
-const char* MAGNET_CHANNEL_NAME = "DemoChannel";
-
+const char* kSayHello = "sayHello";
 const char *TEMP_PATH= "/tmp/";
 
 static NPClass plugin_ref_obj = {
@@ -79,67 +65,9 @@ static NPClass plugin_ref_obj = {
      NULL,
 };
 
-class ScriptablePluginObjectPrivate
-{
-public:
-    MagnetPlugin* pPlugin;
-    NPP npp;
-
-    ScriptablePluginObjectPrivate(NPP instance)
-        : pPlugin(0)
-        , npp (instance)
-    {
-    }
-};
-
-class MagnetPluginPrivate
-{
-public:
-    static bool listening;
-    static bool joined;
-    static stMagnetListener* listener;
-    static stMagnetHeader* header;
-    static std::string messages;
-
-    NPP pNPInstance;
-    NPWindow * Window;
-    NPBool bInitialized;
-    ScriptablePluginObject *pScriptableObject;
-    bool magnetInitialized;
-    std::string error;
-
-#ifdef _WINDOWS
-    HWND m_hWnd; 
-#endif
-
-    MagnetPluginPrivate(NPP pNPInstanceIn)
-        : pNPInstance(pNPInstanceIn)
-        , bInitialized(false)
-        , pScriptableObject(NULL)
-    {
-    }
-};
-
-stMagnetHeader* MagnetPluginPrivate::header = 0;
-stMagnetListener* MagnetPluginPrivate::listener = 0;
-
-bool MagnetPluginPrivate::listening = false;
-bool MagnetPluginPrivate::joined = false;
-
 ScriptablePluginObject::ScriptablePluginObject(NPP instance)
-    : d(new ScriptablePluginObjectPrivate(instance))
+     : npp(instance)
 {
-}
-
-ScriptablePluginObject::~ScriptablePluginObject()
-{
-    delete d;
-}
-
-void
-ScriptablePluginObject::SetPlugin(MagnetPlugin* p)
-{
-    d->pPlugin = p;
 }
 
 NPObject* ScriptablePluginObject::Allocate(NPP instance, NPClass* npclass)
@@ -163,83 +91,61 @@ bool ScriptablePluginObject::InvokeDefault(NPObject* obj, const NPVariant* args,
      return true ;
 }
 
-bool StringReturnHelper(const char* outString, NPVariant* result)
-{
-        char* npOutString = (char *)npnfuncs->memalloc(strlen(outString) + 1);
-
-        if (!npOutString)
-            return false;
-
-        strcpy(npOutString, outString);
-        STRINGZ_TO_NPVARIANT(npOutString, *result);
-
-        return true;
-}
-
 bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
                                     const NPVariant* args, uint32_t argCount,
                                     NPVariant* result)
 {
-    ScriptablePluginObject *thisObj = (ScriptablePluginObject*)obj;
+     ScriptablePluginObject *thisObj = (ScriptablePluginObject*)obj;
+     char* name = npnfuncs->utf8fromidentifier(methodName);
+     bool ret_val = false;
+     if (!name) {
+          return ret_val;
+     }
+     if (!strcmp(name, kSayHello)) {
 
-    char* name = npnfuncs->utf8fromidentifier(methodName);
-    bool ret_val = false;
+	bool succ = true;
+        const char* outString = "Success";
+	if ( ! MagnetInit(TEMP_PATH) )
+	{
+		outString = "MagnetInit() failed";
+		succ = false;
+	}
 
-    if (!name) {
-        return ret_val;
-    }
+	if ( succ && ! MagnetStart() )
+	{
+		outString =  "MagnetStart() failed";
+		succ = false;
+	}
 
-    if (!strcmp(name, METHOD_GET_ERROR)) {
+	sleep(1);
 
-        std::string error = thisObj->d->pPlugin->error();
-        if ( ! StringReturnHelper(error.c_str(), result) )
-            return false;
+	if ( succ && ! MagnetStop() ) 
+	{
+		outString = "MagnetStop() failed";
+		succ = false;
+	}
 
-        ret_val = true;
+	if ( succ && ! MagnetRelease() )
+	{
+		outString = "MagnetRelease() failed";
+		succ = false;
+	}
 
-    } else if (!strcmp(name, METHOD_GET_MESSAGES)) {
+          ret_val = true;
+          char* npOutString = (char *)npnfuncs->memalloc(strlen(outString) + 1);
+          if (!npOutString)
+               return false;
 
-        std::string messages = thisObj->d->pPlugin->getMessages();
-        if ( ! StringReturnHelper(messages.c_str(), result) )
-            return false;
+          strcpy(npOutString, outString);
+          STRINGZ_TO_NPVARIANT(npOutString, *result);
 
-        ret_val = true;
 
-    } else if ( !strcmp(name, METHOD_IS_LISTENING) ) {
 
-        ret_val = true;
-        BOOLEAN_TO_NPVARIANT(thisObj->d->pPlugin->isListening(), *result);
-
-    } else if ( !strcmp(name, METHOD_IS_JOINED) ) {
-
-        ret_val = true;
-        BOOLEAN_TO_NPVARIANT(thisObj->d->pPlugin->isJoined(), *result);
-
-    } else if ( !strcmp(name, METHOD_IS_INITIALIZED) ) {
-
-        ret_val = true;
-        BOOLEAN_TO_NPVARIANT(thisObj->d->pPlugin->isInitialized(), *result);
-
-    } else if ( !strcmp(name, METHOD_SAY_HELLO) ) {
-
-        stMagnetPayload *payload = MagnetPayloadInit ();
-
-        const char* HELLO_MESSAGE = "<+Hello_From_Chrome+>";
-        MagnetPayloadAppendBlob (payload, (unsigned char *) HELLO_MESSAGE, strlen (HELLO_MESSAGE) + 1);
-
-        MagnetHeaderSetType (MagnetPluginPrivate::header, "text/plain");
-        MagnetSendData (MagnetPluginPrivate::header, &payload);
-
-        ret_val = true;
-        VOID_TO_NPVARIANT(*result);
-
-    } else {
-        // Exception handling.
-        npnfuncs->setexception(obj, "Unknown method");
-    }
-
+     } else {
+          // Exception handling.
+          npnfuncs->setexception(obj, "Unknown method");
+     }
      npnfuncs->memfree(name);
-
      return ret_val;
 }
 
@@ -254,147 +160,64 @@ bool ScriptablePluginObject::GetProperty(NPObject* obj, NPIdentifier propertyNam
      return false;
 }
 
-MagnetPlugin::MagnetPlugin(NPP pNPInstance)
-    : d(new MagnetPluginPrivate(pNPInstance))
+
+CPlugin::CPlugin(NPP pNPInstance) :
+     m_pNPInstance(pNPInstance),
+     m_bInitialized(false),
+     m_pScriptableObject(NULL)
 {
 #ifdef _WINDOWS
-     d->hWnd = NULL;
+     m_hWnd = NULL;
 #endif
+
 }
 
-MagnetPlugin::~MagnetPlugin()
+CPlugin::~CPlugin()
 {
-    if (d->pScriptableObject)
-        npnfuncs->releaseobject((NPObject*)d->pScriptableObject);
-
+     if (m_pScriptableObject)
+          npnfuncs->releaseobject((NPObject*)m_pScriptableObject);
 #ifdef _WINDOWS
-    d->hWnd = NULL;
+     m_hWnd = NULL;
 #endif
+     m_bInitialized = false;
 
-    d->bInitialized = false;
-    bool success = true;
-
-	if ( ! MagnetStop() ) 
-	{
-		success = false;
-        LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "Failed to stop Magnet");
-	}
-
-	if ( success && ! MagnetRelease() )
-	{
-		success = false;
-        LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "Failed to release Magnet");
-	}
-
-    delete d;
 }
 
-std::string
-MagnetPlugin::error()
+NPBool CPlugin::init(NPWindow* pNPWindow)
 {
-    return d->error;
-}
-
-bool
-MagnetPlugin::isListening()
-{
-    return MagnetPluginPrivate::listening;
-}
-
-std::string
-MagnetPlugin::getMessages()
-{
-    return MagnetPluginPrivate::messages;
-}
-
-bool
-MagnetPlugin::isJoined()
-{
-    return MagnetPluginPrivate::joined;
-}
-
-NPBool MagnetPlugin::init(NPWindow* pNPWindow)
-{
-    if(pNPWindow == NULL)
-        return false;
-
+     if(pNPWindow == NULL)
+          return false;
 #ifdef _WINDOWS
-    d->hWnd = (HWND)pNPWindow->window;
-    if(d->hWnd == NULL)
-        return false;
+     m_hWnd = (HWND)pNPWindow->window;
+     if(m_hWnd == NULL)
+          return false;
 #endif
-
-    d->Window = pNPWindow;
-
-    bool success = true;
-
-    d->listener = MagnetListenerInit();
-
-    auto listen_cb = [] (const char* local_name) {
-        MagnetPluginPrivate::listening = true;
-    };
-
-	MagnetListenerSetOnListeningCB(d->listener, listen_cb);
-
-    auto join_cb  = [] (stMagnetHeader *header) {
-        MagnetPluginPrivate::header = header;
-        MagnetPluginPrivate::joined = true;
-    };
-
-	MagnetListenerSetOnJoinCB(d->listener, join_cb);
-    
-    auto rcv_data_fn = [] (stMagnetHeader *header, stMagnetPayload *payload) {
-	    char* result = (char *) MagnetDataGetContents (MagnetPayloadFirst(payload));
-        MagnetPluginPrivate::messages += std::string(result);
-    };
-
-	MagnetListenerSetOnDataReceivedCB(d->listener, rcv_data_fn);
-
-    if ( ! MagnetInit(TEMP_PATH) )
-    {
-        success = false;
-        d->error = "MagnetInit() failed";
-    }
-
-	MagnetSetListener(d->listener);
-    MagnetJoinChannel(MAGNET_CHANNEL_NAME);
-
-    if ( success && ! MagnetStart() )
-    {
-        success = false;
-        d->error = "MagnetStart() failed";
-    }
-
-    d->bInitialized = success;
-
-    return true;
+     m_Window = pNPWindow;
+     m_bInitialized = true;
+     return true;
 }
 
-NPBool MagnetPlugin::isInitialized()
+NPBool CPlugin::isInitialized()
 {
-     return d->bInitialized;
+     return m_bInitialized;
 }
 
-ScriptablePluginObject* MagnetPlugin::GetScriptableObject()
+ScriptablePluginObject * CPlugin::GetScriptableObject()
 {
-     if (!d->pScriptableObject) {
-
-          d->pScriptableObject = 
-              (ScriptablePluginObject*)npnfuncs->createobject(d->pNPInstance, &plugin_ref_obj);
-
-          d->pScriptableObject->SetPlugin(this);
+     if (!m_pScriptableObject) {
+          m_pScriptableObject = (ScriptablePluginObject*)npnfuncs->createobject(m_pNPInstance, &plugin_ref_obj);
 
           // Retain the object since we keep it in plugin code
           // so that it won't be freed by browser.
-          npnfuncs->retainobject((NPObject*)d->pScriptableObject);
+          npnfuncs->retainobject((NPObject*)m_pScriptableObject);
      }
 
-     return d->pScriptableObject;
+     return m_pScriptableObject;
 }
 
 #ifdef _WINDOWS
-HWND MagnetPlugin::GetHWnd()
+HWND CPlugin::GetHWnd()
 {
-     return d->hWnd;
+     return m_hWnd;
 }
 #endif
