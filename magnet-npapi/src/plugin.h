@@ -62,7 +62,7 @@ public:
   NPP npp;
 };
 
-class CPlugin {
+class MagnetPlugin {
 private:
   NPP m_pNPInstance;
   NPWindow * m_Window;
@@ -73,8 +73,8 @@ private:
 #endif
 
 public:
-  CPlugin(NPP pNPInstance);
-  ~CPlugin();
+  MagnetPlugin(NPP pNPInstance);
+  ~MagnetPlugin();
 
   NPBool init(NPWindow* pNPWindow);
   NPBool isInitialized();

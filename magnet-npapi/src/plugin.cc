@@ -37,7 +37,7 @@
 
 //////////////////////////////////////////////////
 //
-// CPlugin class implementation
+// MagnetPlugin class implementation
 //
 
 #include <signal.h>
@@ -161,7 +161,7 @@ bool ScriptablePluginObject::GetProperty(NPObject* obj, NPIdentifier propertyNam
 }
 
 
-CPlugin::CPlugin(NPP pNPInstance) :
+MagnetPlugin::MagnetPlugin(NPP pNPInstance) :
      m_pNPInstance(pNPInstance),
      m_bInitialized(false),
      m_pScriptableObject(NULL)
@@ -172,7 +172,7 @@ CPlugin::CPlugin(NPP pNPInstance) :
 
 }
 
-CPlugin::~CPlugin()
+MagnetPlugin::~MagnetPlugin()
 {
      if (m_pScriptableObject)
           npnfuncs->releaseobject((NPObject*)m_pScriptableObject);
@@ -183,7 +183,7 @@ CPlugin::~CPlugin()
 
 }
 
-NPBool CPlugin::init(NPWindow* pNPWindow)
+NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 {
      if(pNPWindow == NULL)
           return false;
@@ -197,12 +197,12 @@ NPBool CPlugin::init(NPWindow* pNPWindow)
      return true;
 }
 
-NPBool CPlugin::isInitialized()
+NPBool MagnetPlugin::isInitialized()
 {
      return m_bInitialized;
 }
 
-ScriptablePluginObject * CPlugin::GetScriptableObject()
+ScriptablePluginObject * MagnetPlugin::GetScriptableObject()
 {
      if (!m_pScriptableObject) {
           m_pScriptableObject = (ScriptablePluginObject*)npnfuncs->createobject(m_pNPInstance, &plugin_ref_obj);
@@ -216,7 +216,7 @@ ScriptablePluginObject * CPlugin::GetScriptableObject()
 }
 
 #ifdef _WINDOWS
-HWND CPlugin::GetHWnd()
+HWND MagnetPlugin::GetHWnd()
 {
      return m_hWnd;
 }
