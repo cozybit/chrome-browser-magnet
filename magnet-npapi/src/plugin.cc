@@ -44,12 +44,27 @@
 #include <unistd.h>
 
 #include <string.h>
+
+#include <stdio.h>
+
+#include <string>
+#include <map>
+
 #include "plugin.h"
 
 #include "Magnet.h"
 
-const char* kSayHello = "sayHello";
-const char *TEMP_PATH= "/tmp/";
+#define LOG_PRINT_DEBUG(level, application, fmt, ...) \
+    fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
+
+const char* METHOD_SAY_HELLO = "sayHello";
+const char* METHOD_IS_INITIALIZED = "isInitialized";
+const char* METHOD_GET_ERROR = "getError";
+const char* METHOD_IS_LISTENING = "isListening";
+const char* METHOD_IS_JOINED = "isJoined";
+const char* METHOD_GET_MESSAGES = "getMessages";
+
+const char* MAGNET_CHANNEL_NAME = "DemoChannel";
 
 static NPClass plugin_ref_obj = {
      NP_CLASS_STRUCT_VERSION,
@@ -64,6 +79,19 @@ static NPClass plugin_ref_obj = {
      NULL,
      NULL,
 };
+
+bool StringReturnHelper(const char* outString, NPVariant* result)
+{
+        char* npOutString = (char *)npnfuncs->memalloc(strlen(outString) + 1);
+
+        if (!npOutString)
+            return false;
+
+        strcpy(npOutString, outString);
+        STRINGZ_TO_NPVARIANT(npOutString, *result);
+
+        return true;
+}
 
 class ScriptablePluginObjectPrivate
 {
@@ -111,58 +139,86 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
                                     const NPVariant* args, uint32_t argCount,
                                     NPVariant* result)
 {
-     ScriptablePluginObject *thisObj = (ScriptablePluginObject*)obj;
-     char* name = npnfuncs->utf8fromidentifier(methodName);
-     bool ret_val = false;
-     if (!name) {
-          return ret_val;
-     }
-     if (!strcmp(name, kSayHello)) {
+    ScriptablePluginObject *thisObj = (ScriptablePluginObject*)obj;
+    char* name = npnfuncs->utf8fromidentifier(methodName);
+    bool ret_val = false;
+    if (!name) {
+        return ret_val;
+    }
+    if (!strcmp(name, METHOD_GET_ERROR)) {
+        std::string error = "";
+#ifdef NOT_YET
+        error = thisObj->d->pPlugin->error();
+        if ( ! StringReturnHelper(error.c_str(), result) )
+            return false;
+#endif
 
-	bool succ = true;
-        const char* outString = "Success";
-	if ( ! MagnetInit(TEMP_PATH) )
-	{
-		outString = "MagnetInit() failed";
-		succ = false;
-	}
+        ret_val = true;
+    } else if (!strcmp(name, METHOD_GET_MESSAGES)) {
 
-	if ( succ && ! MagnetStart() )
-	{
-		outString =  "MagnetStart() failed";
-		succ = false;
-	}
+        std::string messages = "";
+#ifdef NOT_YET
+        messages = thisObj->d->pPlugin->getMessages();
+#endif
+        if ( ! StringReturnHelper(messages.c_str(), result) )
+            return false;
 
-	sleep(1);
+        ret_val = true;
 
-	if ( succ && ! MagnetStop() ) 
-	{
-		outString = "MagnetStop() failed";
-		succ = false;
-	}
+    } else if ( !strcmp(name, METHOD_IS_LISTENING) ) {
 
-	if ( succ && ! MagnetRelease() )
-	{
-		outString = "MagnetRelease() failed";
-		succ = false;
-	}
+        ret_val = true;
+        bool b = false;
 
-          ret_val = true;
-          char* npOutString = (char *)npnfuncs->memalloc(strlen(outString) + 1);
-          if (!npOutString)
-               return false;
+#ifdef NOT_YET
+        b = thisObj->d->pPlugin->isListening();
+#endif
 
-          strcpy(npOutString, outString);
-          STRINGZ_TO_NPVARIANT(npOutString, *result);
+        BOOLEAN_TO_NPVARIANT(b, *result);
 
+    } else if ( !strcmp(name, METHOD_IS_JOINED) ) {
 
+        ret_val = true;
+        bool b = false;
 
-     } else {
-          // Exception handling.
-          npnfuncs->setexception(obj, "Unknown method");
-     }
+#ifdef NOT_YET
+        b = thisObj->d->pPlugin->isJoined();
+#endif
+        BOOLEAN_TO_NPVARIANT(b, *result);
+
+    } else if ( !strcmp(name, METHOD_IS_INITIALIZED) ) {
+
+        ret_val = true;
+        bool b = false;
+
+#ifdef NOT_YET
+        b = thisObj->d->pPlugin->isInitialized();
+#endif
+        BOOLEAN_TO_NPVARIANT(b, *result);
+
+    } else if ( !strcmp(name, METHOD_SAY_HELLO) ) {
+
+#ifdef NOT_YET
+        stMagnetPayload *payload = MagnetPayloadInit ();
+
+        const char* HELLO_MESSAGE = "<+Hello_From_Chrome+>";
+        MagnetPayloadAppendBlob (payload, (unsigned char *) HELLO_MESSAGE, strlen (HELLO_MESSAGE) + 1);
+
+        MagnetHeaderSetType (MagnetPluginPrivate::header, "text/plain");
+        MagnetSendData (MagnetPluginPrivate::header, &payload);
+#endif
+
+        ret_val = true;
+        VOID_TO_NPVARIANT(*result);
+
+    } else {
+        // Exception handling.
+        npnfuncs->setexception(obj, "Unknown method");
+    }
+
      npnfuncs->memfree(name);
-     return ret_val;
+
+      return ret_val;
 }
 
 bool ScriptablePluginObject::HasProperty(NPObject* obj, NPIdentifier propertyName)
