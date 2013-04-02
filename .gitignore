@@ -4,4 +4,4 @@ CMakeCache.txt
 CMakeFiles
 Makefile
 *.cmake
-src/libnpmagnet.so
+libnpmagnet.so
