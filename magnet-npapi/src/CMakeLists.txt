@@ -29,6 +29,15 @@ include_directories(
 	../magnet/native_include
 	)
 
+add_executable (testclient testclient.cpp)
+
+target_link_libraries(testclient ${ZMQ})
+target_link_libraries(testclient ${CZMQ})
+target_link_libraries(testclient ${MAGNET})
+target_link_libraries(testclient ${Threads_LIBRARIES})
+target_link_libraries(testclient ${ZLIB_LIBRARIES})
+target_link_libraries(testclient ${PTHREAD})
+
 add_library(npmagnet SHARED np_entry.cc npp_entry.cc plugin.cc)
 
 target_link_libraries(npmagnet ${ZMQ})
