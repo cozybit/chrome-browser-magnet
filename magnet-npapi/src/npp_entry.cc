@@ -103,7 +103,7 @@ NPError NPP_SetWindow(NPP instance, NPWindow* window) {
     return NPERR_GENERIC_ERROR;
 
   // window just created
-  if(!pPlugin->isInitialized() && (window->window != NULL)) { 
+  if(!pPlugin->isInitialized()) { 
     if(!pPlugin->init(window)) {
       delete pPlugin;
       pPlugin = NULL;
