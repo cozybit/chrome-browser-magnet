@@ -57,6 +57,8 @@
 #define LOG_PRINT_DEBUG(level, application, fmt, ...) \
     fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
 
+const char* TEMP_PATH = "/tmp";
+
 const char* METHOD_SAY_HELLO = "sayHello";
 const char* METHOD_IS_INITIALIZED = "isInitialized";
 const char* METHOD_GET_ERROR = "getError";
@@ -100,6 +102,25 @@ public:
 
     ScriptablePluginObjectPrivate(NPP instance)
         : npp(instance)
+    {
+    }
+};
+
+class MagnetPluginPrivate
+{
+public:
+  NPP pNPInstance;
+  NPWindow * Window;
+  NPBool bInitialized;
+  ScriptablePluginObject *pScriptableObject;
+#ifdef _WINDOWS
+  HWND hWnd; 
+#endif
+
+    MagnetPluginPrivate(NPP instance)
+        : pNPInstance(instance)
+        , bInitialized(false)
+        , pScriptableObject(NULL)
     {
     }
 };
@@ -232,11 +253,8 @@ bool ScriptablePluginObject::GetProperty(NPObject* obj, NPIdentifier propertyNam
      return false;
 }
 
-
-MagnetPlugin::MagnetPlugin(NPP pNPInstance) :
-     m_pNPInstance(pNPInstance),
-     m_bInitialized(false),
-     m_pScriptableObject(NULL)
+MagnetPlugin::MagnetPlugin(NPP pNPInstance)
+    : d (new MagnetPluginPrivate(pNPInstance))
 {
 #ifdef _WINDOWS
      m_hWnd = NULL;
@@ -246,13 +264,26 @@ MagnetPlugin::MagnetPlugin(NPP pNPInstance) :
 
 MagnetPlugin::~MagnetPlugin()
 {
-     if (m_pScriptableObject)
-          npnfuncs->releaseobject((NPObject*)m_pScriptableObject);
+     if (d->pScriptableObject)
+          npnfuncs->releaseobject((NPObject*)d->pScriptableObject);
 #ifdef _WINDOWS
-     m_hWnd = NULL;
+     d->hWnd = NULL;
 #endif
-     m_bInitialized = false;
+     d->bInitialized = false;
 
+    bool success = true;
+
+	if ( ! MagnetStop() ) 
+	{
+		success = false;
+        LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "Failed to stop Magnet");
+	}
+
+	if ( success && ! MagnetRelease() )
+	{
+		success = false;
+        LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "Failed to release Magnet");
+	}
 }
 
 NPBool MagnetPlugin::init(NPWindow* pNPWindow)
@@ -260,36 +291,90 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
      if(pNPWindow == NULL)
           return false;
 #ifdef _WINDOWS
-     m_hWnd = (HWND)pNPWindow->window;
-     if(m_hWnd == NULL)
+     d->hWnd = (HWND)pNPWindow->window;
+     if(d->hWnd == NULL)
           return false;
 #endif
-     m_Window = pNPWindow;
-     m_bInitialized = true;
-     return true;
+     d->Window = pNPWindow;
+     d->bInitialized = true;
+
+    bool success = true;
+
+    static stMagnetListener* listener = MagnetListenerInit();
+
+    auto listen_cb = [] (const char* local_name) {
+#if 0
+        MagnetPluginPrivate::listening = true;
+#endif
+    };
+
+	MagnetListenerSetOnListeningCB(listener, listen_cb);
+
+    auto join_cb  = [] (stMagnetHeader *header) {
+#if 0
+        MagnetPluginPrivate::header = header;
+        MagnetPluginPrivate::joined = true;
+#endif
+    };
+
+	MagnetListenerSetOnJoinCB(listener, join_cb);
+    
+    auto rcv_data_fn = [] (stMagnetHeader *header, stMagnetPayload *payload) {
+	    char* result = (char *) MagnetDataGetContents (MagnetPayloadFirst(payload));
+#if 0
+        MagnetPluginPrivate::messages += std::string(result);
+#endif
+    };
+
+	MagnetListenerSetOnDataReceivedCB(listener, rcv_data_fn);
+
+    if ( ! MagnetInit(TEMP_PATH) )
+    {
+        success = false;
+#if 0
+        error = "MagnetInit() failed";
+#endif
+    }
+
+	MagnetSetListener(listener);
+    MagnetJoinChannel(MAGNET_CHANNEL_NAME);
+
+    if ( success && ! MagnetStart() )
+    {
+        success = false;
+#if 0
+        d->error = "MagnetStart() failed";
+#endif
+    }
+
+#if 0
+    d->bInitialized = success;
+#endif
+
+    return true;
 }
 
 NPBool MagnetPlugin::isInitialized()
 {
-     return m_bInitialized;
+     return d->bInitialized;
 }
 
 ScriptablePluginObject * MagnetPlugin::GetScriptableObject()
 {
-     if (!m_pScriptableObject) {
-          m_pScriptableObject = (ScriptablePluginObject*)npnfuncs->createobject(m_pNPInstance, &plugin_ref_obj);
+     if (!d->pScriptableObject) {
+          d->pScriptableObject = (ScriptablePluginObject*)npnfuncs->createobject(d->pNPInstance, &plugin_ref_obj);
 
           // Retain the object since we keep it in plugin code
           // so that it won't be freed by browser.
-          npnfuncs->retainobject((NPObject*)m_pScriptableObject);
+          npnfuncs->retainobject((NPObject*)d->pScriptableObject);
      }
 
-     return m_pScriptableObject;
+     return d->pScriptableObject;
 }
 
 #ifdef _WINDOWS
 HWND MagnetPlugin::GetHWnd()
 {
-     return m_hWnd;
+     return d->hWnd;
 }
 #endif

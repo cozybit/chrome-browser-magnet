@@ -66,25 +66,21 @@ private:
   ScriptablePluginObjectPrivate* d;
 };
 
+class MagnetPluginPrivate;
+
 class MagnetPlugin {
 private:
-  NPP m_pNPInstance;
-  NPWindow * m_Window;
-  NPBool m_bInitialized;
-  ScriptablePluginObject *m_pScriptableObject;
-#ifdef _WINDOWS
-  HWND m_hWnd; 
-#endif
+    MagnetPluginPrivate* d;
 
 public:
-  MagnetPlugin(NPP pNPInstance);
-  ~MagnetPlugin();
+    MagnetPlugin(NPP pNPInstance);
+    ~MagnetPlugin();
 
-  NPBool init(NPWindow* pNPWindow);
-  NPBool isInitialized();
-  ScriptablePluginObject *GetScriptableObject();
+    NPBool init(NPWindow* pNPWindow);
+    NPBool isInitialized();
+    ScriptablePluginObject *GetScriptableObject();
 #ifdef _WINDOWS
-  HWND GetHWnd(); 
+    HWND GetHWnd(); 
 #endif
 };
 
