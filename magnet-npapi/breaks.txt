@@ -1,0 +1,2 @@
+b NPP_SetWindow
+b ScriptablePluginObject::Invoke
