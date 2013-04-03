@@ -46,29 +46,33 @@ extern NPNetscapeFuncs* npnfuncs;
 
 class ScriptablePluginObjectPrivate;
 
-class ScriptablePluginObject: NPObject {
-public:
-  ScriptablePluginObject(NPP instance);
-  virtual ~ScriptablePluginObject();
+class ScriptablePluginObject: NPObject 
+{
+    friend class MagnetPlugin;
 
-  static NPObject* Allocate(NPP instance, NPClass* npclass);
-  static void Deallocate(NPObject* obj);
-  static bool HasMethod(NPObject* obj, NPIdentifier methodName);
-  static bool InvokeDefault(NPObject* obj, const NPVariant* args,
-                            uint32_t argCount, NPVariant* result);
-  static bool Invoke(NPObject* obj, NPIdentifier methodName,
-                     const NPVariant* args, uint32_t argCount,
-                     NPVariant* result);
-  static bool HasProperty(NPObject* obj, NPIdentifier propertyName);
-  static bool GetProperty(NPObject* obj, NPIdentifier propertyName,
-                          NPVariant* result);
+public:
+    ScriptablePluginObject(NPP instance);
+    virtual ~ScriptablePluginObject();
+
+    static NPObject* Allocate(NPP instance, NPClass* npclass);
+    static void Deallocate(NPObject* obj);
+    static bool HasMethod(NPObject* obj, NPIdentifier methodName);
+    static bool InvokeDefault(NPObject* obj, const NPVariant* args,
+                                uint32_t argCount, NPVariant* result);
+    static bool Invoke(NPObject* obj, NPIdentifier methodName,
+                        const NPVariant* args, uint32_t argCount,
+                        NPVariant* result);
+    static bool HasProperty(NPObject* obj, NPIdentifier propertyName);
+    static bool GetProperty(NPObject* obj, NPIdentifier propertyName,
+                            NPVariant* result);
 private:
-  ScriptablePluginObjectPrivate* d;
+    ScriptablePluginObjectPrivate* d;
 };
 
 class MagnetPluginPrivate;
 
-class MagnetPlugin {
+class MagnetPlugin 
+{
 private:
     MagnetPluginPrivate* d;
 

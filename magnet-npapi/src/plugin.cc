@@ -99,6 +99,7 @@ class ScriptablePluginObjectPrivate
 {
 public:
     NPP npp; 
+    //MagnetPluginPrivate* pPlugin;
 
     ScriptablePluginObjectPrivate(NPP instance)
         : npp(instance)
@@ -109,10 +110,15 @@ public:
 class MagnetPluginPrivate
 {
 public:
+
   NPP pNPInstance;
   NPWindow * Window;
   NPBool bInitialized;
   ScriptablePluginObject *pScriptableObject;
+
+  std::string error;
+  static std::string messages;
+
 #ifdef _WINDOWS
   HWND hWnd; 
 #endif
@@ -161,18 +167,19 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
                                     NPVariant* result)
 {
     ScriptablePluginObject *thisObj = (ScriptablePluginObject*)obj;
+
     char* name = npnfuncs->utf8fromidentifier(methodName);
     bool ret_val = false;
+
     if (!name) {
         return ret_val;
     }
     if (!strcmp(name, METHOD_GET_ERROR)) {
         std::string error = "";
-#ifdef NOT_YET
-        error = thisObj->d->pPlugin->error();
+
+        //error = thisObj->d->pPlugin->error;
         if ( ! StringReturnHelper(error.c_str(), result) )
             return false;
-#endif
 
         ret_val = true;
     } else if (!strcmp(name, METHOD_GET_MESSAGES)) {
@@ -290,13 +297,14 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 {
      if(pNPWindow == NULL)
           return false;
+
 #ifdef _WINDOWS
      d->hWnd = (HWND)pNPWindow->window;
      if(d->hWnd == NULL)
           return false;
 #endif
-     d->Window = pNPWindow;
-     d->bInitialized = true;
+    d->Window = pNPWindow;
+    d->bInitialized = true;
 
     bool success = true;
 
@@ -320,10 +328,10 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 	MagnetListenerSetOnJoinCB(listener, join_cb);
     
     auto rcv_data_fn = [] (stMagnetHeader *header, stMagnetPayload *payload) {
+
 	    char* result = (char *) MagnetDataGetContents (MagnetPayloadFirst(payload));
-#if 0
         MagnetPluginPrivate::messages += std::string(result);
-#endif
+
     };
 
 	MagnetListenerSetOnDataReceivedCB(listener, rcv_data_fn);
@@ -331,9 +339,9 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
     if ( ! MagnetInit(TEMP_PATH) )
     {
         success = false;
-#if 0
-        error = "MagnetInit() failed";
-#endif
+        //d->error = "MagnetInit() failed";
+
+        LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "failed to init magnet");
     }
 
 	MagnetSetListener(listener);
@@ -342,14 +350,12 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
     if ( success && ! MagnetStart() )
     {
         success = false;
-#if 0
-        d->error = "MagnetStart() failed";
-#endif
+        //d->error = "MagnetStart() failed";
+
+        LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "failed to start magnet");
     }
 
-#if 0
-    d->bInitialized = success;
-#endif
+    //d->bInitialized = success;
 
     return true;
 }
@@ -363,6 +369,7 @@ ScriptablePluginObject * MagnetPlugin::GetScriptableObject()
 {
      if (!d->pScriptableObject) {
           d->pScriptableObject = (ScriptablePluginObject*)npnfuncs->createobject(d->pNPInstance, &plugin_ref_obj);
+          //d->pScriptableObject->d->pPlugin = d;
 
           // Retain the object since we keep it in plugin code
           // so that it won't be freed by browser.
