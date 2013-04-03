@@ -6,7 +6,15 @@
 
 window.onload = function(){
     test = document.getElementById("pluginObj");
-    alert(test.sayHello());
+
+    alert(
+        "initialized: " + test.isInitialized() + ", " +
+        "listening: " + test.isListening() + ", " + 
+        "joined: " + test.isJoined() + ", " + 
+        "error: '" + test.getError() + "'"
+    );
+
+    test.sayHello();
 }
 
 </script>

@@ -57,6 +57,44 @@
 #define LOG_PRINT_DEBUG(level, application, fmt, ...) \
     fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
 
+bool _getEnvDebugFlag()
+{
+    char* e = getenv("MAGNET_NPAPI_DEBUG");
+    return e != 0 && strlen(e) > 0 && strcmp(e, "0") != 0;
+}
+
+#if !defined(NDEBUG) || defined(_DEBUG)
+
+    volatile int caught_signal = 0;
+
+    void sigcont_handler(int sig)
+    {
+        caught_signal = sig; 
+    }
+
+    void pause_jam()
+    {
+        caught_signal = 0;
+        int s = 30;
+
+        while(s-- > 0 && caught_signal == 0)
+            sleep(1);
+    }
+
+    class SigHandleInit
+    {
+    public:
+        SigHandleInit() {
+
+            if ( _getEnvDebugFlag() )
+                signal(SIGCONT, sigcont_handler);
+        }
+    };
+
+    static SigHandleInit sigHandleInit;
+
+#endif
+
 const char* TEMP_PATH = "/tmp";
 
 const char* METHOD_SAY_HELLO = "sayHello";
@@ -99,7 +137,7 @@ class ScriptablePluginObjectPrivate
 {
 public:
     NPP npp; 
-    //MagnetPluginPrivate* pPlugin;
+    MagnetPluginPrivate* pPlugin;
 
     ScriptablePluginObjectPrivate(NPP instance)
         : npp(instance)
@@ -174,20 +212,22 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
     if (!name) {
         return ret_val;
     }
-    if (!strcmp(name, METHOD_GET_ERROR)) {
-        std::string error = "";
 
-        //error = thisObj->d->pPlugin->error;
+    if (!strcmp(name, METHOD_GET_ERROR)) {
+
+        std::string error = "";
+        error = thisObj->d->pPlugin->error;
+
         if ( ! StringReturnHelper(error.c_str(), result) )
             return false;
 
         ret_val = true;
+
     } else if (!strcmp(name, METHOD_GET_MESSAGES)) {
 
         std::string messages = "";
-#ifdef NOT_YET
-        messages = thisObj->d->pPlugin->getMessages();
-#endif
+        //messages = thisObj->d->pPlugin->getMessages();
+
         if ( ! StringReturnHelper(messages.c_str(), result) )
             return false;
 
@@ -198,9 +238,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         ret_val = true;
         bool b = false;
 
-#ifdef NOT_YET
-        b = thisObj->d->pPlugin->isListening();
-#endif
+        //b = thisObj->d->pPlugin->isListening();
 
         BOOLEAN_TO_NPVARIANT(b, *result);
 
@@ -209,9 +247,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         ret_val = true;
         bool b = false;
 
-#ifdef NOT_YET
-        b = thisObj->d->pPlugin->isJoined();
-#endif
+        //b = thisObj->d->pPlugin->isJoined();
         BOOLEAN_TO_NPVARIANT(b, *result);
 
     } else if ( !strcmp(name, METHOD_IS_INITIALIZED) ) {
@@ -219,9 +255,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         ret_val = true;
         bool b = false;
 
-#ifdef NOT_YET
-        b = thisObj->d->pPlugin->isInitialized();
-#endif
+        b = thisObj->d->pPlugin->bInitialized;
         BOOLEAN_TO_NPVARIANT(b, *result);
 
     } else if ( !strcmp(name, METHOD_SAY_HELLO) ) {
@@ -266,13 +300,13 @@ MagnetPlugin::MagnetPlugin(NPP pNPInstance)
 #ifdef _WINDOWS
      m_hWnd = NULL;
 #endif
-
 }
 
 MagnetPlugin::~MagnetPlugin()
 {
      if (d->pScriptableObject)
           npnfuncs->releaseobject((NPObject*)d->pScriptableObject);
+
 #ifdef _WINDOWS
      d->hWnd = NULL;
 #endif
@@ -280,29 +314,38 @@ MagnetPlugin::~MagnetPlugin()
 
     bool success = true;
 
-	if ( ! MagnetStop() ) 
-	{
-		success = false;
+    if ( ! MagnetStop() ) 
+    {
+        success = false;
         LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "Failed to stop Magnet");
-	}
+    }
 
-	if ( success && ! MagnetRelease() )
-	{
-		success = false;
+    if ( success && ! MagnetRelease() )
+    {
+        success = false;
         LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "Failed to release Magnet");
-	}
+    }
 }
+
+static bool g_PAUSED_ONCE = false;
 
 NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 {
-     if(pNPWindow == NULL)
-          return false;
+    if ( ! g_PAUSED_ONCE )
+    {
+        g_PAUSED_ONCE = true;
+        pause_jam();
+    }
+
+    if(pNPWindow == NULL)
+        return false;
 
 #ifdef _WINDOWS
-     d->hWnd = (HWND)pNPWindow->window;
-     if(d->hWnd == NULL)
-          return false;
+    d->hWnd = (HWND)pNPWindow->window;
+    if(d->hWnd == NULL)
+        return false;
 #endif
+
     d->Window = pNPWindow;
     d->bInitialized = true;
 
@@ -316,7 +359,7 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 #endif
     };
 
-	MagnetListenerSetOnListeningCB(listener, listen_cb);
+    MagnetListenerSetOnListeningCB(listener, listen_cb);
 
     auto join_cb  = [] (stMagnetHeader *header) {
 #if 0
@@ -325,37 +368,37 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 #endif
     };
 
-	MagnetListenerSetOnJoinCB(listener, join_cb);
+    MagnetListenerSetOnJoinCB(listener, join_cb);
     
     auto rcv_data_fn = [] (stMagnetHeader *header, stMagnetPayload *payload) {
-
-	    char* result = (char *) MagnetDataGetContents (MagnetPayloadFirst(payload));
+#if 0
+        char* result = (char *) MagnetDataGetContents (MagnetPayloadFirst(payload));
         MagnetPluginPrivate::messages += std::string(result);
-
+#endif
     };
 
-	MagnetListenerSetOnDataReceivedCB(listener, rcv_data_fn);
+    MagnetListenerSetOnDataReceivedCB(listener, rcv_data_fn);
 
     if ( ! MagnetInit(TEMP_PATH) )
     {
         success = false;
-        //d->error = "MagnetInit() failed";
 
+        d->error = "MagnetInit() failed";
         LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "failed to init magnet");
     }
 
-	MagnetSetListener(listener);
+    MagnetSetListener(listener);
     MagnetJoinChannel(MAGNET_CHANNEL_NAME);
 
     if ( success && ! MagnetStart() )
     {
         success = false;
-        //d->error = "MagnetStart() failed";
 
+        d->error = "MagnetStart() failed";
         LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "failed to start magnet");
     }
 
-    //d->bInitialized = success;
+    d->bInitialized = success;
 
     return true;
 }
@@ -368,8 +411,12 @@ NPBool MagnetPlugin::isInitialized()
 ScriptablePluginObject * MagnetPlugin::GetScriptableObject()
 {
      if (!d->pScriptableObject) {
-          d->pScriptableObject = (ScriptablePluginObject*)npnfuncs->createobject(d->pNPInstance, &plugin_ref_obj);
-          //d->pScriptableObject->d->pPlugin = d;
+
+          d->pScriptableObject =
+              (ScriptablePluginObject*)npnfuncs
+                ->createobject(d->pNPInstance, &plugin_ref_obj);
+
+          d->pScriptableObject->d->pPlugin = d;
 
           // Retain the object since we keep it in plugin code
           // so that it won't be freed by browser.
