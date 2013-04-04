@@ -126,6 +126,12 @@ public:
         , listener(nullptr)
     {
     }
+
+    ~GlobalMagnetData()
+    {
+        MagnetHeaderDestroy(&header);
+        MagnetListenerDestroy(&listener);
+    }
 };
 
 GlobalMagnetData g_globalData;
@@ -241,15 +247,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         BOOLEAN_TO_NPVARIANT(b, *result);
 
     } else if ( !strcmp(name, METHOD_SAY_HELLO) ) {
-#if 0
-        stMagnetPayload *payload = MagnetPayloadInit ();
 
-        const char* HELLO_MESSAGE = "<+Hello_From_Chrome+>";
-        MagnetPayloadAppendBlob (payload, (unsigned char *) HELLO_MESSAGE, strlen (HELLO_MESSAGE) + 1);
-
-        MagnetHeaderSetType (MagnetPluginPrivate::header, "text/plain");
-        MagnetSendData (MagnetPluginPrivate::header, &payload);
-#endif
         ret_val = true;
         VOID_TO_NPVARIANT(*result);
 
@@ -333,8 +331,20 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
     MagnetListenerSetOnListeningCB(g_globalData.listener, listen_cb);
 
     auto join_cb  = [] (stMagnetHeader *header) {
-        g_globalData.header = header;
+
+        if ( g_globalData.header == nullptr )
+            g_globalData.header = MagnetHeaderDup(header);
+
         g_globalData.joined = true;
+
+        stMagnetPayload *payload = MagnetPayloadInit ();
+
+        const char* HELLO_MESSAGE = "<+Hello_From_Chrome+>";
+        MagnetPayloadAppendBlob (payload, (unsigned char *) HELLO_MESSAGE, strlen (HELLO_MESSAGE) + 1);
+
+        MagnetHeaderSetType (header, "text/plain");
+        MagnetSendData (header, &payload);
+
     };
 
     MagnetListenerSetOnJoinCB(g_globalData.listener, join_cb);
