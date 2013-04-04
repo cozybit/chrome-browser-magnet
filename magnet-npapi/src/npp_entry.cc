@@ -28,7 +28,50 @@
 * ***** END LICENSE BLOCK ***** */
 
 #include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <signal.h>
+
 #include "plugin.h"
+
+bool _getEnvDebugFlag()
+{
+    char* e = getenv("MAGNET_NPAPI_DEBUG");
+    return e != 0 && strlen(e) > 0 && strcmp(e, "0") != 0;
+}
+
+#if !defined(NDEBUG) || defined(_DEBUG)
+
+    volatile int caught_signal = 0;
+
+    void sigcont_handler(int sig)
+    {
+        caught_signal = sig; 
+    }
+
+    void pause_jam()
+    {
+        caught_signal = 0;
+        int s = 30;
+
+        while(s-- > 0 && caught_signal == 0)
+            sleep(1);
+    }
+
+    class SigHandleInit
+    {
+    public:
+        SigHandleInit() {
+
+            if ( _getEnvDebugFlag() )
+                signal(SIGCONT, sigcont_handler);
+        }
+    };
+
+    static SigHandleInit sigHandleInit;
+
+#endif
 
 const char* MAGNET_PLUGIN_NAME = "MagnetPlugin";
 const char* MAGNET_PLUGIN_DESC = "MagnetPlugin for doing magnet communications in the browser";
@@ -62,23 +105,33 @@ NPError NPP_GetValue(NPP instance, NPPVariable variable, void* value) {
 NPError NPP_New(NPMIMEType pluginType, NPP instance,
                 uint16_t mode, int16_t argc, char* argn[],
                 char* argv[], NPSavedData* saved) {
-  if(instance == NULL)
-    return NPERR_INVALID_INSTANCE_ERROR;
+
+    static bool g_PAUSED_ONCE = false;
+
+    if ( ! g_PAUSED_ONCE )
+    {
+        g_PAUSED_ONCE = true;
+        pause_jam();
+    }
+
+    if(instance == NULL)
+        return NPERR_INVALID_INSTANCE_ERROR;
 
 #ifdef _WINDOWS
-  int bWindowed = 1;
+    int bWindowed = 1;
 #else
-  int bWindowed = 0;
+    int bWindowed = 0;
 #endif
-  npnfuncs->setvalue(instance, NPPVpluginWindowBool, (void *)(size_t)bWindowed);
 
-  MagnetPlugin * pPlugin = new MagnetPlugin(instance);
-  if(pPlugin == NULL)
-    return NPERR_OUT_OF_MEMORY_ERROR;
+    npnfuncs->setvalue(instance, NPPVpluginWindowBool, (void *)(size_t)bWindowed);
 
-  instance->pdata = (void *)pPlugin;
+    MagnetPlugin * pPlugin = new MagnetPlugin(instance);
+    if(pPlugin == NULL)
+        return NPERR_OUT_OF_MEMORY_ERROR;
 
-  return NPERR_NO_ERROR;
+    instance->pdata = (void *)pPlugin;
+
+    return NPERR_NO_ERROR;
 }
 
 NPError NPP_Destroy(NPP instance, NPSavedData** save) {

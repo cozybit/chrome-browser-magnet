@@ -57,44 +57,6 @@
 #define LOG_PRINT_DEBUG(level, application, fmt, ...) \
     fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
 
-bool _getEnvDebugFlag()
-{
-    char* e = getenv("MAGNET_NPAPI_DEBUG");
-    return e != 0 && strlen(e) > 0 && strcmp(e, "0") != 0;
-}
-
-#if !defined(NDEBUG) || defined(_DEBUG)
-
-    volatile int caught_signal = 0;
-
-    void sigcont_handler(int sig)
-    {
-        caught_signal = sig; 
-    }
-
-    void pause_jam()
-    {
-        caught_signal = 0;
-        int s = 30;
-
-        while(s-- > 0 && caught_signal == 0)
-            sleep(1);
-    }
-
-    class SigHandleInit
-    {
-    public:
-        SigHandleInit() {
-
-            if ( _getEnvDebugFlag() )
-                signal(SIGCONT, sigcont_handler);
-        }
-    };
-
-    static SigHandleInit sigHandleInit;
-
-#endif
-
 const char* TEMP_PATH = "/tmp";
 
 const char* METHOD_SAY_HELLO = "sayHello";
@@ -145,6 +107,29 @@ public:
     }
 };
 
+class GlobalMagnetData
+{
+public:
+    bool joined;
+    bool listening;
+
+    stMagnetHeader* header;
+    stMagnetListener* listener;
+
+    std::string messages;
+    std::string error;
+
+    GlobalMagnetData()
+        : joined(false)
+        , listening(false)
+        , header(nullptr)
+        , listener(nullptr)
+    {
+    }
+};
+
+GlobalMagnetData g_globalData;
+
 class MagnetPluginPrivate
 {
 public:
@@ -153,13 +138,6 @@ public:
   NPWindow * Window;
   NPBool bInitialized;
   ScriptablePluginObject *pScriptableObject;
-
-  std::string error;
-
-  static bool joined;
-  static bool listening;
-  static stMagnetHeader* header;
-  static std::string messages;
 
 #ifdef _WINDOWS
   HWND hWnd; 
@@ -220,7 +198,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
     if (!strcmp(name, METHOD_GET_ERROR)) {
 
         std::string error = "";
-        error = thisObj->d->pPlugin->error;
+        error = g_globalData.error;
 
         if ( ! StringReturnHelper(error.c_str(), result) )
             return false;
@@ -230,7 +208,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
     } else if (!strcmp(name, METHOD_GET_MESSAGES)) {
 
         std::string messages = "";
-        messages = thisObj->d->pPlugin->messages;
+        messages = g_globalData.messages;
 
         if ( ! StringReturnHelper(messages.c_str(), result) )
             return false;
@@ -242,7 +220,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         ret_val = true;
         bool b = false;
 
-        b = thisObj->d->pPlugin->listening;
+        b = g_globalData.listening;
 
         BOOLEAN_TO_NPVARIANT(b, *result);
 
@@ -251,7 +229,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         ret_val = true;
         bool b = false;
 
-        b = thisObj->d->pPlugin->joined;
+        b = g_globalData.joined;
         BOOLEAN_TO_NPVARIANT(b, *result);
 
     } else if ( !strcmp(name, METHOD_IS_INITIALIZED) ) {
@@ -263,7 +241,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         BOOLEAN_TO_NPVARIANT(b, *result);
 
     } else if ( !strcmp(name, METHOD_SAY_HELLO) ) {
-
+#if 0
         stMagnetPayload *payload = MagnetPayloadInit ();
 
         const char* HELLO_MESSAGE = "<+Hello_From_Chrome+>";
@@ -271,7 +249,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
 
         MagnetHeaderSetType (MagnetPluginPrivate::header, "text/plain");
         MagnetSendData (MagnetPluginPrivate::header, &payload);
-
+#endif
         ret_val = true;
         VOID_TO_NPVARIANT(*result);
 
@@ -329,16 +307,9 @@ MagnetPlugin::~MagnetPlugin()
     }
 }
 
-static bool g_PAUSED_ONCE = false;
 
 NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 {
-    if ( ! g_PAUSED_ONCE )
-    {
-        g_PAUSED_ONCE = true;
-        pause_jam();
-    }
-
     if(pNPWindow == NULL)
         return false;
 
@@ -353,44 +324,44 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
 
     bool success = true;
 
-    static stMagnetListener* listener = MagnetListenerInit();
+    g_globalData.listener = MagnetListenerInit();
 
     auto listen_cb = [] (const char* local_name) {
-        MagnetPluginPrivate::listening = true;
+        g_globalData.listening = true;
     };
 
-    MagnetListenerSetOnListeningCB(listener, listen_cb);
+    MagnetListenerSetOnListeningCB(g_globalData.listener, listen_cb);
 
     auto join_cb  = [] (stMagnetHeader *header) {
-        MagnetPluginPrivate::header = header;
-        MagnetPluginPrivate::joined = true;
+        g_globalData.header = header;
+        g_globalData.joined = true;
     };
 
-    MagnetListenerSetOnJoinCB(listener, join_cb);
+    MagnetListenerSetOnJoinCB(g_globalData.listener, join_cb);
     
     auto rcv_data_fn = [] (stMagnetHeader *header, stMagnetPayload *payload) {
         char* result = (char *) MagnetDataGetContents (MagnetPayloadFirst(payload));
-        MagnetPluginPrivate::messages += std::string(result);
+        g_globalData.messages += std::string(result);
     };
 
-    MagnetListenerSetOnDataReceivedCB(listener, rcv_data_fn);
+    MagnetListenerSetOnDataReceivedCB(g_globalData.listener, rcv_data_fn);
 
     if ( ! MagnetInit(TEMP_PATH) )
     {
         success = false;
 
-        d->error = "MagnetInit() failed";
+        g_globalData.error = "MagnetInit() failed";
         LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "failed to init magnet");
     }
 
-    MagnetSetListener(listener);
+    MagnetSetListener(g_globalData.listener);
     MagnetJoinChannel(MAGNET_CHANNEL_NAME);
 
     if ( success && ! MagnetStart() )
     {
         success = false;
 
-        d->error = "MagnetStart() failed";
+        g_globalData.error = "MagnetStart() failed";
         LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "failed to start magnet");
     }
 
