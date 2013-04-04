@@ -104,7 +104,7 @@ const char* METHOD_IS_LISTENING = "isListening";
 const char* METHOD_IS_JOINED = "isJoined";
 const char* METHOD_GET_MESSAGES = "getMessages";
 
-const char* MAGNET_CHANNEL_NAME = "DemoChannel";
+const char* MAGNET_CHANNEL_NAME = "Magnet";
 
 static NPClass plugin_ref_obj = {
      NP_CLASS_STRUCT_VERSION,
@@ -155,6 +155,10 @@ public:
   ScriptablePluginObject *pScriptableObject;
 
   std::string error;
+
+  static bool joined;
+  static bool listening;
+  static stMagnetHeader* header;
   static std::string messages;
 
 #ifdef _WINDOWS
@@ -226,7 +230,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
     } else if (!strcmp(name, METHOD_GET_MESSAGES)) {
 
         std::string messages = "";
-        //messages = thisObj->d->pPlugin->getMessages();
+        messages = thisObj->d->pPlugin->messages;
 
         if ( ! StringReturnHelper(messages.c_str(), result) )
             return false;
@@ -238,7 +242,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         ret_val = true;
         bool b = false;
 
-        //b = thisObj->d->pPlugin->isListening();
+        b = thisObj->d->pPlugin->listening;
 
         BOOLEAN_TO_NPVARIANT(b, *result);
 
@@ -247,7 +251,7 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
         ret_val = true;
         bool b = false;
 
-        //b = thisObj->d->pPlugin->isJoined();
+        b = thisObj->d->pPlugin->joined;
         BOOLEAN_TO_NPVARIANT(b, *result);
 
     } else if ( !strcmp(name, METHOD_IS_INITIALIZED) ) {
@@ -260,7 +264,6 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
 
     } else if ( !strcmp(name, METHOD_SAY_HELLO) ) {
 
-#ifdef NOT_YET
         stMagnetPayload *payload = MagnetPayloadInit ();
 
         const char* HELLO_MESSAGE = "<+Hello_From_Chrome+>";
@@ -268,7 +271,6 @@ bool ScriptablePluginObject::Invoke(NPObject* obj, NPIdentifier methodName,
 
         MagnetHeaderSetType (MagnetPluginPrivate::header, "text/plain");
         MagnetSendData (MagnetPluginPrivate::header, &payload);
-#endif
 
         ret_val = true;
         VOID_TO_NPVARIANT(*result);
@@ -354,27 +356,21 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
     static stMagnetListener* listener = MagnetListenerInit();
 
     auto listen_cb = [] (const char* local_name) {
-#if 0
         MagnetPluginPrivate::listening = true;
-#endif
     };
 
     MagnetListenerSetOnListeningCB(listener, listen_cb);
 
     auto join_cb  = [] (stMagnetHeader *header) {
-#if 0
         MagnetPluginPrivate::header = header;
         MagnetPluginPrivate::joined = true;
-#endif
     };
 
     MagnetListenerSetOnJoinCB(listener, join_cb);
     
     auto rcv_data_fn = [] (stMagnetHeader *header, stMagnetPayload *payload) {
-#if 0
         char* result = (char *) MagnetDataGetContents (MagnetPayloadFirst(payload));
         MagnetPluginPrivate::messages += std::string(result);
-#endif
     };
 
     MagnetListenerSetOnDataReceivedCB(listener, rcv_data_fn);

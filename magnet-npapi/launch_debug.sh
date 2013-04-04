@@ -3,7 +3,7 @@
 D=`dirname $0`
 
 export MAGNET_NPAPI_DEBUG=1
-screen -m -d -S chromium $D/launch_chromium.sh src/test.html
+screen -m -d -S chromium $D/launch_chromium.sh $D/src/test.html
 
 echo -n "Waiting for chromium to start"
 
