@@ -6,16 +6,25 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=gnu++0x")
 endif()
 
-find_library ( ZMQ REQUIRED NAMES zmq )
-find_library ( CZMQ REQUIRED NAMES czmq )
-
 find_library(PTHREAD REQUIRED NAMES pthread)
 
-find_library(MAGNET
-	REQUIRED
-	NAMES magnet
-	HINTS "."
-	)
+if (COMPILE_32BIT_NPAPI)
+
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
+    set(CMAKE_LDFLAGS "${CMAKE_LDFLAGS} -m32")
+
+    set(MAGNET_LIB_HINT "./lib/32")
+
+else()
+
+    set(MAGNET_LIB_HINT "./lib/64")
+
+endif()
+
+find_library ( MAGNET   REQUIRED NAMES magnet   HINTS "${MAGNET_LIB_HINT}")
+find_library ( ZMQ      REQUIRED NAMES zmq      HINTS "${MAGNET_LIB_HINT}")
+find_library ( CZMQ     REQUIRED NAMES czmq     HINTS "${MAGNET_LIB_HINT}")
 
 find_package(Threads REQUIRED)
 include_directories(${Threads_INCLUDE_DIRS})

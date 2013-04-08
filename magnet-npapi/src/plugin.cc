@@ -55,7 +55,7 @@
 #include "Magnet.h"
 
 #define LOG_PRINT_DEBUG(level, application, fmt, ...) \
-    fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
+    fprintf (stderr, "[libmagnet] " fmt "\n", ##__VA_ARGS__)
 
 const char* TEMP_PATH = "/tmp";
 
@@ -92,7 +92,7 @@ bool StringReturnHelper(const char* outString, NPVariant* result)
         strcpy(npOutString, outString);
         STRINGZ_TO_NPVARIANT(npOutString, *result);
 
-        return true;
+          return true;
 }
 
 class ScriptablePluginObjectPrivate
@@ -115,7 +115,7 @@ public:
 
     stMagnetHeader* header;
     stMagnetListener* listener;
-
+    
     std::string messages;
     std::string error;
 
