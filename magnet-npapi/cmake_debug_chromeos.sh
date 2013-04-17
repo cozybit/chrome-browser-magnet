@@ -1,0 +1,1 @@
+CC=i686-pc-linux-gnu-gcc CXX=i686-pc-linux-gnu-c++ CFLAGS=-L/build/x86-generic/lib -I/build/x86-generic/include --sysroot=/build/x86-generic CXXFLAGS=-L/build/x86-generic/lib -I/build/x86-generic/include --sysroot=/build/x86-generic cmake CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DCOMPILE_32BIT_NPAPI=YES
