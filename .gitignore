@@ -1,4 +1,5 @@
-.*.swp
+.*.sw*
+*.sublime-*
 .*~
 CMakeCache.txt
 CMakeFiles
