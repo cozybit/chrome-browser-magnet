@@ -1,0 +1,4129 @@
+diff --git a/chrome/browser/extensions/api/magnet/magnet_api.cc b/chrome/browser/extensions/api/magnet/magnet_api.cc
+new file mode 100644
+index 0000000..90ec7bf
+--- /dev/null
++++ b/chrome/browser/extensions/api/magnet/magnet_api.cc
+@@ -0,0 +1,140 @@
++// Copyright (c) 2013 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/lazy_instance.h"
++
++#include "chrome/browser/extensions/api/magnet/magnet_api.h"
++#include "chrome/common/extensions/api/magnet.h"
++
++#include "chrome/browser/extensions/event_names.h"
++
++#include <iostream>
++#include <set>
++
++#include "Magnet.h"
++
++static std::set<Profile*> g_profiles;
++
++namespace extensions {
++
++MagnetAPI::MagnetAPI(Profile* profile) 
++    : profile_(profile)
++{
++    ExtensionSystem::Get(profile_)
++        ->event_router()
++        ->RegisterObserver(this, extensions::event_names::kOnMagnetListening);
++
++    ExtensionSystem::Get(profile_)
++        ->event_router()
++        ->RegisterObserver(this, extensions::event_names::kOnMagnetJoin);
++
++    ExtensionSystem::Get(profile_)
++        ->event_router()
++        ->RegisterObserver(this, extensions::event_names::kOnMagnetReceiveData);
++}
++
++MagnetAPI::~MagnetAPI() {
++}
++
++void MagnetAPI::Shutdown() {
++    ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
++    g_profiles.erase(profile_);
++}
++
++void MagnetAPI::OnListenerAdded(const EventListenerInfo& details) {
++  ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
++  g_profiles.insert(profile_);
++}
++
++static base::LazyInstance<ProfileKeyedAPIFactory<MagnetAPI> >
++    g_factory = LAZY_INSTANCE_INITIALIZER;
++
++// static
++ProfileKeyedAPIFactory<MagnetAPI>* MagnetAPI::GetFactoryInstance() {
++  return &g_factory.Get();
++}
++
++#if 0
++// static
++static MagnetAPI* MagnetAPI_Get(Profile* profile) {
++  return MagnetAPI::GetFactoryInstance()->GetForProfile(profile);
++}
++#endif
++
++} // namespace extensions
++
++class GlobalMagnetData
++{
++public:
++    stMagnetHeader* header;
++    stMagnetListener* listener;
++
++    GlobalMagnetData()
++        : header(0)
++        , listener(0)
++    {
++    }
++
++    ~GlobalMagnetData()
++    {
++        MagnetHeaderDestroy(&header);
++        MagnetListenerDestroy(&listener);
++    }
++};
++
++static GlobalMagnetData g_globalData;
++
++namespace Initialize = extensions::api::magnet::Initialize;
++namespace SendData = extensions::api::magnet::SendData;
++
++namespace extensions {
++
++bool MagnetInitializeFunction::RunImpl() {
++
++    scoped_ptr<Initialize::Params> params(Initialize::Params::Create(*args_));
++    EXTENSION_FUNCTION_VALIDATE(params);
++
++    std::cerr << "MagnetInitializeFunction: " << params->channel << std::endl;
++
++    bool success = true;
++    std::string error = "";
++
++    if ( ! MagnetInit("/tmp") )
++    {
++        success = false;
++
++        error = "MagnetInit() failed";
++        std::cerr << error << std::endl;
++    }
++
++    MagnetSetListener(g_globalData.listener);
++    MagnetJoinChannel(params->channel.c_str());
++
++    if ( success && ! MagnetStart() )
++    {
++        success = false;
++
++        error = "MagnetStart() failed";
++        std::cerr << error << std::endl;
++    }
++
++    results_ = Initialize::Results::Create(success, error);
++
++    return true;
++}
++
++bool MagnetSendDataFunction::RunImpl() {
++
++    scoped_ptr<SendData::Params> params(SendData::Params::Create(*args_));
++    EXTENSION_FUNCTION_VALIDATE(params);
++
++    bool success = true;
++    std::string error = "";
++
++    results_ = SendData::Results::Create(success, error);
++
++    return true;
++}
++
++}  // namespace extensions
+diff --git a/chrome/browser/extensions/api/magnet/magnet_api.h b/chrome/browser/extensions/api/magnet/magnet_api.h
+new file mode 100644
+index 0000000..7a8b8bb
+--- /dev/null
++++ b/chrome/browser/extensions/api/magnet/magnet_api.h
+@@ -0,0 +1,67 @@
++
++#ifndef CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
++#define CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
++
++#include "chrome/common/extensions/api/magnet.h"
++
++#include "chrome/browser/extensions/extension_function.h"
++#include "chrome/browser/extensions/event_router.h"
++
++#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
++
++namespace extensions {
++
++class MagnetAPI : public ProfileKeyedAPI
++                , public EventRouter::Observer 
++{
++ public:
++  explicit MagnetAPI(Profile* profile);
++  virtual ~MagnetAPI();
++
++  // ProfileKeyedAPI implementation.
++  static ProfileKeyedAPIFactory<MagnetAPI>* GetFactoryInstance();
++
++  // ProfileKeyedService implementation.
++  virtual void Shutdown() OVERRIDE;
++
++  // EventRouter::Observer implementation.
++  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
++
++ private:
++  friend class ProfileKeyedAPIFactory<MagnetAPI>;
++
++  Profile* profile_;
++
++  // ProfileKeyedAPI implementation.
++  static const char* service_name() {
++    return "MagnetAPI";
++  }
++
++  DISALLOW_COPY_AND_ASSIGN(MagnetAPI);
++};
++
++class MagnetInitializeFunction : public SyncExtensionFunction {
++ public:
++  DECLARE_EXTENSION_FUNCTION("magnet.initialize", MAGNET_INITIALIZE)
++
++ protected:
++  virtual ~MagnetInitializeFunction() {}
++
++  // ExtensionFunction:
++  virtual bool RunImpl() OVERRIDE;
++};
++
++class MagnetSendDataFunction : public SyncExtensionFunction {
++ public:
++  DECLARE_EXTENSION_FUNCTION("magnet.sendData", MAGNET_SENDDATA)
++
++ protected:
++  virtual ~MagnetSendDataFunction() {}
++
++  // ExtensionFunction:
++  virtual bool RunImpl() OVERRIDE;
++};
++
++}  // namespace extensions
++
++#endif  // CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
+diff --git a/chrome/browser/extensions/event_names.cc b/chrome/browser/extensions/event_names.cc
+index 132ad65b..15885f1 100644
+--- a/chrome/browser/extensions/event_names.cc
++++ b/chrome/browser/extensions/event_names.cc
+@@ -98,6 +98,10 @@ const char kOnNotificationButtonClicked[] = "notifications.onButtonClicked";
+ const char kOnNetworksChanged[] = "networkingPrivate.onNetworksChanged";
+ const char kOnNetworkListChanged[] = "networkingPrivate.onNetworkListChanged";
+ 
++const char kOnMagnetListening[] = "magnet.onListening";
++const char kOnMagnetJoin[] = "magnet.onJoin";
++const char kOnMagnetReceiveData[] = "magnet.onReceiveData";
++
+ }  // namespace event_names
+ 
+ }  // namespace extensions
+diff --git a/chrome/browser/extensions/event_names.h b/chrome/browser/extensions/event_names.h
+index 9667ea0..fa0a2e8 100644
+--- a/chrome/browser/extensions/event_names.h
++++ b/chrome/browser/extensions/event_names.h
+@@ -112,6 +112,11 @@ extern const char kOnNotificationButtonClicked[];
+ extern const char kOnNetworksChanged[];
+ extern const char kOnNetworkListChanged[];
+ 
++// Magnet
++extern const char kOnMagnetListening[];
++extern const char kOnMagnetJoin[];
++extern const char kOnMagnetReceiveData[];
++
+ }  // namespace event_names
+ 
+ }  // namespace extensions
+diff --git a/chrome/browser/extensions/extension_function_histogram_value.h b/chrome/browser/extensions/extension_function_histogram_value.h
+index a6e6023..780e573 100644
+--- a/chrome/browser/extensions/extension_function_histogram_value.h
++++ b/chrome/browser/extensions/extension_function_histogram_value.h
+@@ -500,6 +500,8 @@ enum HistogramValue {
+   WALLPAPERPRIVATE_RESETWALLPAPER,
+   DEVELOPERPRIVATE_PERMISSIONS,
+   WEBSTOREPRIVATE_ENABLEAPPLAUNCHER,
++  MAGNET_INITIALIZE,
++  MAGNET_SENDDATA,
+   ENUM_BOUNDARY // Last entry: Add new entries above.
+ };
+ 
+diff --git a/chrome/chrome_browser.gypi b/chrome/chrome_browser.gypi
+index c089aaa..ac44e47 100644
+--- a/chrome/chrome_browser.gypi
++++ b/chrome/chrome_browser.gypi
+@@ -2480,7 +2480,7 @@
+         ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {
+           'link_settings': {
+             'libraries': [
+-              '-lXss',
++              '-lXss -lmagnet -lzmq -lczmq',
+             ],
+           },
+         }],
+diff --git a/chrome/chrome_browser_extensions.gypi b/chrome/chrome_browser_extensions.gypi
+index 04640d9..b8fb1df 100644
+--- a/chrome/chrome_browser_extensions.gypi
++++ b/chrome/chrome_browser_extensions.gypi
+@@ -50,6 +50,9 @@
+       ],
+       'include_dirs': [
+         '..',
++        '../magnet/agent_include',
++        '../magnet/core_include',
++        '../magnet/native_include',
+         '<(INTERMEDIATE_DIR)',
+       ],
+       'sources': [
+@@ -240,6 +243,8 @@
+         'browser/extensions/api/idltest/idltest_api.h',
+         'browser/extensions/api/input/input.cc',
+         'browser/extensions/api/input/input.h',
++        'browser/extensions/api/magnet/magnet_api.cc',
++        'browser/extensions/api/magnet/magnet_api.h',
+         'browser/extensions/api/managed_mode_private/managed_mode_private_api.cc',
+         'browser/extensions/api/managed_mode_private/managed_mode_private_api.h',
+         'browser/extensions/api/management/management_api.cc',
+diff --git a/chrome/common/extensions/api/_permission_features.json b/chrome/common/extensions/api/_permission_features.json
+index ed4585f..75c6d67 100644
+--- a/chrome/common/extensions/api/_permission_features.json
++++ b/chrome/common/extensions/api/_permission_features.json
+@@ -213,6 +213,11 @@
+       "okddffdblfhhnmhodogpojmfkjmhinfp"   // HTerm dev
+     ]
+   },
++  "magnet": {
++    "channel": "dev",
++    "extension_types": ["extension", "packaged_app", "platform_app"],
++    "min_manifest_version" : 2
++  },
+   "managedModePrivate": {
+     "channel": "dev",
+     "extension_types": ["extension", "packaged_app"],
+diff --git a/chrome/common/extensions/api/api.gyp b/chrome/common/extensions/api/api.gyp
+index a89e95c..ee7e326 100644
+--- a/chrome/common/extensions/api/api.gyp
++++ b/chrome/common/extensions/api/api.gyp
+@@ -58,6 +58,7 @@
+           'history.json',
+           'i18n.json',
+           'idle.json',
++          'magnet.idl',
+           'managed_mode_private.json',
+           'management.json',
+           'media_galleries.idl',
+diff --git a/chrome/common/extensions/api/magnet.idl b/chrome/common/extensions/api/magnet.idl
+new file mode 100644
+index 0000000..02b02b8
+--- /dev/null
++++ b/chrome/common/extensions/api/magnet.idl
+@@ -0,0 +1,23 @@
++// Magnet API
++
++// An API for managing magnet data over a mesh
++namespace magnet {
++
++  callback OnMagnetCallback = void (boolean result, DOMString error);
++
++  interface Functions {
++    // Initialize the Magnet API
++    static void initialize(DOMString channel, OnMagnetCallback callback);
++    // Sends data to channel
++    static void sendData(DOMString data, OnMagnetCallback callback);
++  };
++
++  interface Events {
++    // Fired when a listening event happens
++    static void onListening(DOMString localName);
++    // Fired when a join event happens
++    static void onJoin();
++    // Fired when a join event happens
++    static void onReceiveData(DOMString data);
++  };
++};
+diff --git a/chrome/common/extensions/permissions/api_permission.h b/chrome/common/extensions/permissions/api_permission.h
+index f9719f3..7cae358 100644
+--- a/chrome/common/extensions/permissions/api_permission.h
++++ b/chrome/common/extensions/permissions/api_permission.h
+@@ -100,6 +100,7 @@ class APIPermission {
+     kSerial,
+     kSessionRestore,
+     kSocket,
++    kMagnet,
+     kStorage,
+     kStreamsPrivate,
+     kSyncFileSystem,
+diff --git a/chrome/common/extensions/permissions/chrome_api_permissions.cc b/chrome/common/extensions/permissions/chrome_api_permissions.cc
+index 531fc79..3484b4f 100644
+--- a/chrome/common/extensions/permissions/chrome_api_permissions.cc
++++ b/chrome/common/extensions/permissions/chrome_api_permissions.cc
+@@ -200,6 +200,11 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
+     { APIPermission::kSocket, "socket",
+       APIPermissionInfo::kFlagCannotBeOptional, 0,
+       PermissionMessage::kNone, &CreateAPIPermission<SocketPermission> },
++
++    /// MAGNET PERMISSIONS
++    { APIPermission::kMagnet, "magnet",
++      APIPermissionInfo::kFlagCannotBeOptional },
++
+     { APIPermission::kAppCurrentWindowInternal, "app.currentWindowInternal" },
+     { APIPermission::kAppRuntime, "app.runtime" },
+     { APIPermission::kAppWindow, "app.window" },
+diff --git a/magnet/agent_include/ConnectivityControl.h b/magnet/agent_include/ConnectivityControl.h
+new file mode 100644
+index 0000000..e69de29
+diff --git a/magnet/agent_include/FileReceiver.h b/magnet/agent_include/FileReceiver.h
+new file mode 100644
+index 0000000..28c7e9e
+--- /dev/null
++++ b/magnet/agent_include/FileReceiver.h
+@@ -0,0 +1,112 @@
++#pragma once
++#include "FileSender.h"
++#include <string>
++#include <map>
++#include <vector>
++#include <set>
++#include <queue>
++#include "stringconverter.h"
++#include "FileTransfer.h"
++#include "MeshMessaging.h"
++#include "MagnetListener.h"
++
++class ReceiveTask;
++
++using namespace std;
++class FileReceiver
++{
++    public:
++    static const int CHUNK_SIZE_THRESHOLD = 500 * 1024;
++    static const int CHUNK_SIZE = 300 * 1024;
++	
++    class ReceiveTask
++    {
++        class Item 
++        {
++        public :
++            Item(const string &filePath, const string &exchangeId, long filesize);
++
++            string getExchangeId() { return mExchangeId; }
++            string getFileName() { return mFileName; }        
++            TransferState getState() { return mState; }
++            void setState(TransferState  state) { mState=state; }
++            void updateInfo(long size, TransferState state);
++
++        private :
++            string mExchangeId;
++            string mFileName;
++            long mIngSize;
++            long mTotalSize;        
++            TransferState mState;
++        };
++        
++    public:
++        ReceiveTask(MeshMessaging *meshmessaging, MagnetCallbacks::MagnetChannelCallback * channelCB, FileReceiver *task, const string &fromNode, const string &channel);
++        ~ReceiveTask();
++
++        TransferState getStatusFirstItem();
++        string getNode() { return mNode; }   
++        string getChannel() { return mChannel; }       
++        bool updateInfo(const string &exchangeId, long transferredsize, TransferState state);
++        string getLastExchangeId();    
++        void dispatch();
++        void accept( long chunkTimeoutMsec, int chunkRetries, long chunkSize);
++        void reject();
++        void cancel();
++        void addItem(const string &filePath, const string &exchangeId, long filesize);
++        void notifyMsg(int reason);
++    
++    private:
++        MeshMessaging *mMeshMessaging;
++        MagnetCallbacks::MagnetChannelCallback * mChannelCB;
++        FileReceiver* mParent;
++    
++        map<string, Item*> mItems;          // key:taskID, content:ALL,         
++		
++        string mNode;		
++        string mChannel;        
++        string mTaskId;
++        
++        int mSentFileCount;
++    };
++    
++
++    FileReceiver(MeshMessaging *meshmessaging, MagnetCallbacks::MagnetChannelCallback * channelCB);
++    ~FileReceiver();
++
++    void onNodeJoined(const string &nodeName, const string &channel);
++    void onNodeLeft(const string &node, const string &channel);
++    void onFileFailed(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash, const string &exchangeId, int reason);
++    void onFileNotified(const string &fromNode, const string &channel, const string &filename, const string &hash, const string &type, const string &exchangeId, long fileSize, const string &msg1, bool isNotify);
++    void onChunkReceived(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash, const string &exchangeId, const string &type, long fileSize, long offset);
++    void onFileReceived(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash, const string &exchangeId, const string &type, const string &filename, long fileSize);
++
++    bool acceptFile(const string &channel, const string &exchangeId, long chunkTimeoutMsec, int chunkRetries, long chunkSize);
++    bool rejectFile(const string &channel, const string &exchangeId);
++    bool cancelFile(const string &channel, const string &exchangeId);
++    vector<FileState*> getReceiverStatus(const string &taskId);
++    void notifyDisconnect(const string& node, const string& channel);
++
++private:
++    void removeTaskofNodes(const string &node, const string &channel, const string &taskId);
++    void notifyAllTasks(const string &node, const string &channel, int reason);
++    void cancelAllTasks(const string &node, const string &channel);
++    void cancelTask(const string &node, const string &channel, const string &taskId);
++    void updateInfo(const string &exchangeId, long transferredsize, TransferState state);
++    void _lock(int line);
++    void _unlock(int line);    
++    
++private:
++    MeshMessaging *mMeshMessaging;
++    MagnetCallbacks::MagnetChannelCallback * mChannelCB;
++    
++#if (defined (__WINDOWS__))
++    HANDLE mutex;
++#else
++    pthread_mutex_t mutex;
++#endif
++
++    multimap<string, string> mNodes;       // key : node+channel, value : taskID
++    map<string, ReceiveTask*> mTasks;   // key : taskID, value : ReceiveTask object
++	
++};
+diff --git a/magnet/agent_include/FileSender.h b/magnet/agent_include/FileSender.h
+new file mode 100644
+index 0000000..926996b
+--- /dev/null
++++ b/magnet/agent_include/FileSender.h
+@@ -0,0 +1,118 @@
++#pragma once
++#include "FileReceiver.h"
++#include <string>
++#include <map>
++#include <vector>
++#include <set>
++#include "stringconverter.h"
++#include "FileTransfer.h"
++#include "MeshMessaging.h"
++#include "MagnetListener.h"
++
++using namespace std;
++class FileInfo;
++
++static int gFileSenderSeq = 10000;
++
++class FileSender
++{
++public:
++
++    class SendTask
++    {
++        class Item 
++        {
++        public :
++            Item(const string &filePath, const string &exchangeId, long filesize);
++
++            string getExchangeId() { return mExchangeId; }
++            string getFileName() { return mFileName; }        
++            TransferState getState() { return mState; }
++            void setState(TransferState  state) { mState=state; }
++            void updateInfo(long size, TransferState state);
++
++        private :
++            string mExchangeId;
++            string mFileName;
++            long mIngSize;
++            long mTotalSize;        
++            TransferState mState;
++        };
++    
++    public:
++        SendTask(MeshMessaging *meshmessaging, MagnetCallbacks::MagnetChannelCallback * mChannelCB, FileSender *task, const string &toNode, const string &toChannel, const string &type, const string &filePath, long timeout, const string &taskId);
++        SendTask(MeshMessaging *meshmessaging, MagnetCallbacks::MagnetChannelCallback * mChannelCB, FileSender *task, const string &toNode, const string &toChannel, const string &type,  vector<string> filePaths, long timeout, const string &taskId);        
++        ~SendTask();
++
++        string getNode() { return mNode; }   
++        string getChannel() { return mChannel; }       
++        bool updateInfo(const string &exchangeId, long transferredsize, TransferState state);
++        string getLastExchangeId();    
++        void dispatch();
++        void cancel();
++        void notifyMsg(int reason);        
++
++    private:
++        MeshMessaging *mMeshMessaging;    
++        MagnetCallbacks::MagnetChannelCallback * mChannelCB;
++        FileSender* mParent;
++            
++        map<string, Item*> mItems; // key:taskID, content:ALL, 
++        
++        string mNode;        
++        string mChannel;        
++        string mTaskId;
++        string mType;
++        long   mTimeoutMsec;
++        int mSentFileCount;
++    };
++
++        
++    FileSender(MeshMessaging *meshmessaging, MagnetCallbacks::MagnetChannelCallback * mChannelCB);
++    ~FileSender();
++
++    void setLocalNodeName(const string &localNode) { mLocalNode = localNode; }
++    void onNodeJoined(const string &nodeName, const string &channel);
++    void onNodeLeft(const string &node, const string &channel);
++    void onFileFailed(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash, const string &exchangeId, int reason);    
++    void onChunkSent(const string &toNode, const string & toChannel, const string & filename, const string & hash, const string & exchangeId, const string & type, long fileSize, long offset, long chunkSize);
++    void onFileSent(const string toNode, const string toChannel, const string filename, const string hash, const string exchangeId, const string type, const long fileSize);
++
++    string shareFile(const string &toNode, const string &toChannel, const string &type, const string &filePath, long timeoutMsec);
++    string multishareFile(const string &toNode, const string &toChannel, const string &type, vector<string> filePaths, long timeoutMsec);
++    bool   cancelFile(const string &channel, const string &exchangeId);
++    vector<FileState*> getSenderStatus(const string &taskId);
++    void notifyDisconnect(const string& node, const string& channel);
++    
++private:
++    void removeTaskofNodes(const string &node, const string &channel, const string &taskId);
++    void notifyAllTasks(const string &node, const string &channel, int reason);        
++    void cancelAllTasks(const string &node, const string &channel);
++    void cancelTask(const string &node, const string &channel, const string &taskId );
++    void updateInfo(const string &exchangeId, long transferredsize, TransferState state);            
++    void _lock(int line);
++    void _unlock(int line);  
++    
++private:
++    static const long SHARE_FILE_TIMEOUT_MILISECONDS;
++    
++    MeshMessaging *mMeshMessaging;
++    MagnetCallbacks::MagnetChannelCallback * mChannelCB;
++    
++#if (defined (__WINDOWS__))
++    HANDLE mutex;
++#else
++    pthread_mutex_t mutex;
++#endif
++        
++    string mLocalNode;
++    
++    multimap<string, string> mNodes;     // key:node+channel, content:taskID
++    map<string, SendTask*> mTasks;         // key:taskID, content:sendtask object
++    
++    void removeNode(const string &node);
++    void updateInfo(const string &exchangeId, long long transferred, TransferState state);
++    
++protected:
++};
++
+diff --git a/magnet/agent_include/FileTransfer.h b/magnet/agent_include/FileTransfer.h
+new file mode 100644
+index 0000000..4993e6b
+--- /dev/null
++++ b/magnet/agent_include/FileTransfer.h
+@@ -0,0 +1,58 @@
++#ifndef _FileTransfer_H_
++#define _FileTransfer_H_
++
++#include <string>
++#include <map>
++using namespace std;
++
++typedef enum _TransferState
++{
++    STATE_UNKNOWN,
++    STATE_SEND_WAITING,
++    STATE_RECEIVE_WAITING,
++    STATE_SENDING,
++    STATE_RECEIVING,
++    STATE_REQ_CANCEL,        
++    STATE_TCANCELED,
++    STATE_TFAILED,
++    STATE_COMPLETED
++}TransferState;
++
++class FileState
++{
++public:
++    string mExchangeId;
++    string mFileName;
++    long mIngSize;
++    long mTotalSize;        
++    TransferState mState;        
++
++    void set(const string& exID, const string& name, long ingsize, long totsize, TransferState state) 
++        { mExchangeId=exID; mFileName=name; mIngSize=ingsize; mTotalSize=totsize; mState=state; }
++};
++
++class FileTransfer
++{
++public:
++    class NotificationInfo
++    {
++    public:
++        string taskId;
++        int index;
++        int filesCount;
++    };
++
++    static NotificationInfo *getInfo(string str);
++    static string getTaskId(string str);
++    static string createExchangeId(const string &taskId, int contentIndex, int numberOfFiles);
++    
++private:
++    static const string TASK_ID;
++    static const string CONTENT_INDEX;
++    static const string NUMBER_OF_FILES;
++
++    static string flatten(map <string,string> &localMap);
++    static void unflatten(map <string,string> &localMap, const string &params);
++};
++
++#endif
+\ No newline at end of file
+diff --git a/magnet/agent_include/MagnetChannelManager.h b/magnet/agent_include/MagnetChannelManager.h
+new file mode 100644
+index 0000000..c7309c6
+--- /dev/null
++++ b/magnet/agent_include/MagnetChannelManager.h
+@@ -0,0 +1,149 @@
++#include "MeshMessaging.h"
++#include "log.h"
++#include "FileSender.h"
++#include "FileReceiver.h"
++#include "ServiceConstants.h"
++#include <iostream>
++#include <string>
++
++#include <map>
++#include <list>
++#ifdef USE_JNI
++#include <jni.h>
++#endif
++
++using namespace std;
++
++class MagnetChannelManager
++{
++
++public:
++    MagnetChannelManager();
++    ~MagnetChannelManager();
++#ifdef USE_JNI
++    void init(JNIEnv* env, MagnetCallbacks::MagnetCoreCallback * coreCB, MagnetCallbacks::MagnetChannelCallback * channelCB);
++#else
++    void init(MagnetCallbacks::MagnetCoreCallback * coreCB, MagnetCallbacks::MagnetChannelCallback * channelCB);
++#endif
++    void release();
++    bool start();
++    bool stop();
++    
++    typedef enum _ConnStates
++    {        
++        CONNECTED,
++        DISCONNECTED,
++        START,
++        OFF,
++    }ConnStates;
++    
++    class MagnetChannel
++    {
++    public:
++        MagnetChannel(MeshMessaging* mMeshMessaging, string mCahnnel, bool mConnectivity, MagnetChannelManager* mChannelManager, int nSecurity);
++        ~MagnetChannel();
++        
++        int sendData(string destination, string toChannel, string type, list<unsigned char *>* payload, int *parts_len);
++        void leaveChannel();
++        string getNodeIpAddress(string nodename); //twkim_teporary
++        void updateNodes(string nodename, string ip, bool join); //twkim_teporary
++        list<string> getConnectedNodeList(string channel);
++        map<string, string> &getNodeMap() { return mNodeIpAdress; }
++        
++    private:
++        string mChannel;
++        map<string, string> mNodeIpAdress;      // key:nodename, value:ip
++        MagnetChannelManager* mChannelManager;
++        MeshMessaging* mMeshMessaging;
++        
++    };
++
++    void onDestroy();
++    int joinChannel(string Channel,  int Security);
++    MagnetChannel* getChannel(string Channel);
++    void leaveChannel(string Channel);
++    bool destroyCore(void);
++#ifdef __ANDROID__
++    int createCore(void);
++#else
++    void createCore(void);
++#endif
++    void rejoinChannels(void);
++
++    int sendData(string destination, string channel, string type, list<unsigned char *>* payload, int *parts_len);
++    string shareFile(string toNode, string toChannel, string type, string path, long timeoutMsec);
++    string multishareFile(string toNode, string toChannel, string type, vector<string> &filePaths, long timeoutMsec);
++    bool acceptFile(string channel, string exchangeId, long chunkTimeoutMsec, int chunkRetries, long chunkSize);
++    bool rejectFile(string channel, string exchangeId);
++    bool cancelFile(string channel, string exchangeId);	
++    vector<FileState*> getSenderStatus(const string &taskId);
++    vector<FileState*> getReceiverStatus(const string &taskId);
++
++    list<string> getConnectedNodeList(string channel);
++    void setLivenessTimeout(long timeoutMsec);
++    void discoverNode(string nodeName, string ip, int port, bool monitorNode);
++    void undiscoverNode(string nodename);
++    void useUdpDiscovery(bool value);
++    void useNodeExpiry(bool value);
++    void usePeriodicBeacon(bool value);
++    void setPeriodicBeaconTimeOut(long value);    
++    void setConnectivityState(int state);
++    void setTmpFolder(string path);
++    void setUsingInterface(string interfaceInfo);
++    string getActiveInterface();
++    
++    MagnetCallbacks::MagnetCoreCallback * mCoreCB;
++    MagnetCallbacks::MagnetChannelCallback * mChannelCB;    
++        
++    int getDiscoveryPortNumber();
++    string getDiscoveryIP();
++    string getNodeIpAddress(string nodeName, string channel);
++    int getNodePort(string nodeName, string channel);
++
++    void setTmpFolderPathStr(string tmpPath);
++    void setSecureKeyPathStr(string keyPath);
++    list<string> getJoinedChannelList();
++    
++private:
++    map<string, MagnetChannel*> mChannels;
++    vector<string>* m_pChList;
++
++    int nodeCount;
++    ConnStates mConnState;
++    bool mConnectivity;
++    bool mServiceHasPeers;
++    string mTmpPath;
++    string m_strPathSecurityKey;
++
++    MeshMessaging* mMeshMessaging;
++    MeshMessageReceiver* mMeshReceiver;
++
++    FileSender *mFileSender;
++    FileReceiver *mFileReceiver;
++
++#if (defined (__WINDOWS__))
++    HANDLE mutex;
++#else
++    pthread_mutex_t mutex;
++#endif
++
++    void _lock(int line);
++    void _unlock(int line);
++    void handleConnectivity(int state);
++    void deleteIncomingTmpFiles(void);
++    void deleteIncomingTmpFolder(void);
++    void joinAllChannels();
++    
++public:
++    void notifyData(string fromNode, string fromChannel, string type, list<unsigned char*> *payload, int *sizes);
++    void notifyFile(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, string type, long fileSize, string msg1);
++    void notifyChunkReceived(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, string type, long fileSize, long offset);
++    void notifyFileReceived(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, string type, string pathToFile, long fileSize);
++    void notifyFileFailed(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, int reason);
++    void notifyChunkSent(string toNode, string toChannel, string filename, string hash, string exchangeId, string type, long fileSize, long offset, long chunkSize);
++    void notifyFileSent(const string toNode, const string toChannel, const string filename, const string hash, const string exchangeId, const string type, const long fileSize);
++    void notifyEvent(string nodename, ServiceEvent e, string channel, int reason);
++    void notifyJoinedEvent(string nodename, ServiceEvent e, string channel, string ipAddress);
++    void notifyCreateFailure(int reason);
++    
++};
+diff --git a/magnet/agent_include/MagnetInterface.h b/magnet/agent_include/MagnetInterface.h
+new file mode 100644
+index 0000000..39979fd
+--- /dev/null
++++ b/magnet/agent_include/MagnetInterface.h
+@@ -0,0 +1,280 @@
++#ifndef _MagnetInterface_H_
++#define _MagnetInterface_H_
++/* 
++*    Magnet Interface Functions
++*    App -> Magnet
++*/
++
++/*============================================================================================
++*
++* Include Files
++*
++============================================================================================*/
++#include "FileTransfer.h"
++#include "MagnetListener.h"
++#include "vector"
++
++#ifdef USE_JNI
++#include <jni.h>
++#endif
++
++using namespace std;
++/*============================================================================================
++*
++* Defininations
++*
++============================================================================================*/
++
++
++/**
++    * 마그넷 서비스 초기화.
++    *
++    * @param[in] customAction  서비스 이름.
++*/
++namespace MagnetInterface
++{
++#ifdef USE_JNI
++    int MagnetInit( MagnetCallbacks::MagnetCoreCallback * coreCB, 
++        MagnetCallbacks::MagnetChannelCallback * channelCB, 
++        string tmpPath,
++        JNIEnv * env);
++    #else
++    int MagnetInit( MagnetCallbacks::MagnetCoreCallback * coreCB, 
++        MagnetCallbacks::MagnetChannelCallback * channelCB, 
++        string tmpPath);
++    #endif
++    
++#ifdef USE_JNI
++    int MagnetInit( MagnetCallbacks::MagnetCoreCallback * coreCB, 
++        MagnetCallbacks::MagnetChannelCallback * channelCB, 
++        string tmpPath,
++        string securityKeyPath,
++        JNIEnv * env);
++    #else
++    int MagnetInit( MagnetCallbacks::MagnetCoreCallback * coreCB, 
++        MagnetCallbacks::MagnetChannelCallback * channelCB, 
++        string tmpPath,
++        string securityKeyPath);
++    #endif
++    
++    /**
++        * 마그넷 서비스 해제.
++        *
++        * @return true 마그넷 서비스가 성공적으로 종료됨, false 마그넷 서비스 종료하지 못함.
++    */
++    bool MagnetRelease(void);
++    
++    /**
++    	* 마그셋 서비스 시작.
++    	*
++    	* @return true 마그셋 서비스가 성공적으로 시작됨, false 마그넷 서비스가 성공적으로 시작되지 못함.
++    */
++    bool MagnetStart(void);
++    
++    /**
++    	* 마그넷 서비스 종료.
++    	*
++    	* @return true 마그넷 서비스가 성공적으로 종료됨, false 마그넷 서비스 종료하지 못함.
++    */
++    bool MagnetStop(void);
++    
++    /**
++        * 원하는 채널에 접속.
++        *
++        * @param[in] channel 접속하고자 하는 채널 이름.
++        * @param[in] nSecurity Security Channel 사용 여부 설정 1 - Security Channel / 0 - Nonsecurity Channel.
++    */
++    int joinChannel(string channel, int nSecurity);
++    
++    /**
++        * 접속된 채널에서 접속 해제.
++        *
++        * @param[in] channel 접속 해제 하고자 하는 채널 이름.
++    */
++    void leaveChannel(string channel);
++    
++    /**
++        * 접속된 채널 혹은 채널내의 특정 node에 대해서 파일 공유.
++        *
++        * @param[in] toNode 목적지 node 이름.
++        * @param[in] toChannel 목적지 채널 이름.
++        * @param[in] type 사용자가 지정한 파일 유형.
++        * @param[in] path 파일 절대 경로.
++        * @param[in] exchangeId 파일 공유 식별자.
++        * @param[in] 파일 공유 만료 시간. 설정을 원하지 않으면 -1로 설정.
++    */
++    string shareFile(string toNode, string toChannel, string type, string path, long timeoutMsec);
++
++    /**
++        * 접속된 채널 혹은 채널내의 특정 node에 대해서 파일 공유.
++        *
++        * @param[in] toNode 목적지 node 이름.
++        * @param[in] toChannel 목적지 채널 이름.
++        * @param[in] type 사용자가 지정한 파일 유형.
++        * @param[in] path 파일 절대 경로.
++        * @param[in] exchangeId 파일 공유 식별자.
++        * @param[in] 파일 공유 만료 시간. 설정을 원하지 않으면 -1로 설정.
++    */    
++    string multishareFile(string toNode, string toChannel, string type, vector<string> &filePaths, long timeoutMsec);
++    
++    /**
++        * 파일 공유 요청을 받아들임.
++        *
++        * @param[in] coreTransactionId 파일 공유 transaction identifier.
++        * @param[in] chunktimeoutMsec 파일 공유 만료 시간. 설정을 원하지 않으면 -1로 설정.
++        * @param[in] chunkRetries Number of times to retry chunk in addition to the initial try. 설정을 원하지 않으면 -1로 설정.
++        * @param[in] chunkSize : Size of chunk to request. 설정을 원하지 않으면 -1로 설정.
++    */
++    bool acceptFile(string channel, string coreTransactionId, long chunktimeoutMsec, int chunkRetries, long chunkSize);
++    
++    /**
++        * 파일 공유 요청 거부.
++        *
++        * @param[in] coreTransactionId 파일 공유 transaction identifier.
++    */
++    bool rejectFile(string channel, string exchangeId);
++    
++    /**
++        * 공유중인 파일 전송 취소.
++        *
++        * @param[in] exchangeId 파일 공유 식별자.
++        * @param[in] coreTransactionId 파일 공유 transaction identifier.
++    */
++    bool cancelFile(string channel, string exchangeId);
++    
++    /**
++        * 접속된 채널 혹은 채널내의 특정 node에 대해서 메시지 전송.
++        *
++        * @param[in] toNode 목적지 node 이름.
++        * @param[in] toChannel 목적지 channel 이름.
++        * @param[in] type 사용자가 지정한 메시지 유형.
++        * @param[in] payload 전달하고자 하는 메시지 내용.
++    */
++    
++    vector<FileState*> getTransferStatusSender(string taskId);
++    
++    vector<FileState*> getTransferStatusReceiver(string taskId);
++    
++    int sendData(string toNode, string toChannel, string type, list<unsigned char *>* payload, int* parts_len);
++    
++    /**
++    * Magnet Manager에서 바로 Channel List return 하도록
++    * @return Channel List
++    */
++    list<string> getJoinedChannelList(void);
++
++    /**
++    * Magnet Manager에서 바로 Channel List return 하도록
++    * @param channel Channel Name
++    * @return Node List
++    */
++    list<string> getConnectedNodeList(string channel);
++
++    /**
++        * Sets Liveliness Timeout.
++        *
++        * @param[in] timeoutMsec : TimeOut
++    */
++    void setLivenessTimeout(long timeoutMsec);
++    
++    /**
++        * Discover Node.
++        *
++        * @param[in] ip 탐색 하고자 하는 IP 주소.
++        * @param[in] port 탐색하고자하는 node의 포트 정보.
++        * @param[in] monitorNode 모니터링 여부 설정.
++    */
++    void discoverNode(string nodeName, string ip, int port, bool monitorNode);
++    
++    /**
++        * Undiscover node.
++        *
++        * @param[in] nodeName : Node name
++    */
++    void undiscoverNode(string nodeName);
++    
++    /**
++        * Use UDP Discovery.
++        *
++        * @param[in] value : true/false
++    */
++    void setUdpDiscover(bool value);
++    
++    /**
++        * Set node expiration check.
++        *
++        * @param[in] value : true/false
++    */
++    void setNodeExpiry(bool value);
++    
++    /**
++        * Use Periodic Beacon.
++        *
++        * @param[in] value : true/false
++    */
++    void setPeriodicBeacon(bool value);
++
++    /**
++        * Set Periodic Beacon time-out.
++        *
++        * @param[in] value : msec
++    */
++    void setPeriodicBeaconTimeOut(long value);
++    
++    /**
++        * Application에서 사용 할 Network Interface 설정.
++        *
++        * @param[in] value : true/false
++    */
++    void setUsingInterface(string interfaceInfo);
++    
++    /**
++        * Network 접속 상태 설정.
++        *
++        * @param[in] state : OFF[0], CONNECTED[1], DISCONNECTED[2]
++    */
++    void setConnectivityState(int state);
++    
++    /**
++        * Application에서 Core로 Activate된 Network Interface요청.
++        *
++        * @return : Activate된 Network interface name.
++    */
++    string getUsingInterfaceName(void);
++
++    /**
++        * Application에서 자신의 Port Number요청.
++    	* @return Port Number.
++    
++    */
++    int getDiscoveryPortNumber(void);
++    
++    /**
++        * Application에서 자신의 IP요청.
++    	* @return IP Address.
++    
++    */
++    string getDiscoveryIP(void);
++    
++    /**
++        * Application에서 특정 Node의 IP Address를 요청.
++        * @param[in] nodeName : IP Address를 알고자 하는 노드의 이름.
++        * @return : IP Address.
++    */
++    string getNodeIpAddress(string nodeName, string channel);
++
++    /**
++        * Application에서 특정 Node의 Port Number 요청.
++        * @param[in] nodeName : Port Number를 얻고자 하는 Node Name
++        * @return Port Number.
++    */
++    int getNodePort(string nodeName, string channel);
++    
++    /**
++        * check samsung device
++        * @return : true/false
++    */
++    bool getAvailableDevice();
++
++}
++#endif
+diff --git a/magnet/agent_include/MagnetPlatform.h b/magnet/agent_include/MagnetPlatform.h
+new file mode 100644
+index 0000000..d3f5a12
+--- /dev/null
++++ b/magnet/agent_include/MagnetPlatform.h
+@@ -0,0 +1 @@
++
+diff --git a/magnet/agent_include/MeshMessageReceiver.h b/magnet/agent_include/MeshMessageReceiver.h
+new file mode 100644
+index 0000000..6cca835
+--- /dev/null
++++ b/magnet/agent_include/MeshMessageReceiver.h
+@@ -0,0 +1,204 @@
++/* 
++*    ChannelManager Functions
++*    ChannelManager <-> MagnetCore
++*/
++
++#ifndef _MeshMessageReceiver_H_
++#define _MeshMessageReceiver_H_
++
++#include <string>
++#include<queue>
++#include<list>
++#ifdef USE_JNI
++#include<jni.h>
++#endif
++
++#if (defined __ANDROID__ || defined __unix__)
++#include <pthread.h>
++#else
++
++#include <process.h>
++#ifndef _WINDOWS_
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++#undef WIN32_LEAN_AND_MEAN
++#endif
++#include <winsock2.h>
++#pragma comment(lib, "ws2_32.lib")
++
++#endif
++
++using namespace std;
++
++enum MagnetEvents
++{
++	EVENT_DATA_RECEIVED=0,
++	EVENT_ERROR_RECEIVED,
++	EVENT_FILE_NOTIFIED,
++	EVENT_CHUNK_RECEIVED,
++	EVENT_FILE_RECEIVED,
++	EVENT_FILE_FAILED, //5
++	EVENT_CHUNK_SENDED,
++	EVENT_FILE_SENDED,
++	EVENT_NODE_LISTENING,
++	EVENT_NODE_APPEARED,
++	EVENT_NODE_DISAPPEARED	, //10
++	EVENT_NODE_JOINED,
++	EVENT_NODE_PARTED,
++	EVENT_ACTIVE_NETIFACE,
++	EVENT_CORE_STOPPED, 
++	EVENT_CORE_START_FAILURE, //15
++};
++
++class MagnetEventData
++{
++    public:
++        void setEvent(MagnetEvents event)  { mEvent = event; }
++        MagnetEvents getEvent() { return mEvent; }
++
++        void setFromNode(std::string Node) { mNode = Node; }
++        std::string getFromNode( ) { return mNode; }
++
++        void setFromChannel(std::string Channel) { mChannel = Channel; }
++        std::string getFromChannel( ) { return mChannel; }
++		
++        void setFromIp(std::string ipAddress) { mIpAddress = ipAddress; }
++        std::string getFromIp( ) { return mIpAddress; }
++
++        void setOriginalName(std::string originalName) { mOriginalName = originalName; }
++        std::string getOriginalName( ) { return mOriginalName; }
++
++        void setHash(std::string hash) { mHash = hash; }
++        std::string getHash( ) { return mHash; }
++
++        void setExchangeId(std::string exchangeId) { mExchangeId = exchangeId; }
++        std::string getExchangeId( ) { return mExchangeId; }
++
++        void setType(std::string type) { mType = type; }
++        std::string getType( ) { return mType; }	
++
++        void setTmpPath(std::string tmpPath) { mTmpPath = tmpPath; }
++        std::string getTmpPath( ) { return mTmpPath; }	
++
++        void setIntCoreTransactionId(int coreTransactionId) { mIntCoreTransactionId = coreTransactionId; }
++        int getIntCoreTransactionId( ) { return mIntCoreTransactionId; }
++		
++        void setMsg1(string msg1) { mMsg1 = msg1; }
++        std::string getMsg1( ) { return mMsg1; }
++
++        void setErrorCode(std::string  errorCode) { mErrorMsg = errorCode; }
++        std::string getErrorCode( ) { return mErrorMsg; }	
++
++        void setFileSize(long fileSize) { mFileSize= fileSize; }
++        long getFileSize( ) { return mFileSize; }	
++
++        void setOffset(long offset) { mOffset = offset; }
++        long getOffset( ) { return mOffset; }		
++
++        void setChunkSize(long chunkSize) { mChunkSize = chunkSize; }
++        long getChunkSize( ) { return mChunkSize; }	
++
++        void setReason(int reason) { mReason = reason; }
++        int getReason( ) { return mReason; }	
++
++        void setIfaceName(std::string name) { mIfaceName = name; }
++        std::string getIfaceName( ) { return mIfaceName; }
++        
++        void setIfaceIP(std::string ip) { mIfaceIP = ip; }
++        std::string getIfaceIP( ) { return mIfaceIP; }
++        
++        void setIfaceMac(std::string mac) { mIfaceMac = mac; }
++        std::string getIfaceMac( ) { return mIfaceMac; }
++
++        void setPayload(std::list<unsigned char *> * pPayload) { mPayload = pPayload; } // ???
++        std::list<unsigned char *>* getPayload( ) { return mPayload; }
++
++        void setNodes(std::list<string> * pNodes) { mNodes = pNodes; } // ???
++        std::list<string>* getNodes( ) { return mNodes; }
++
++        void setResult(int ret) { mResult = ret; }
++        int getResult() { return mResult; }
++
++        void setPayloadSizes(int *s) { mSizes = s; }
++        int*   getPayloadSizes() { return mSizes; }
++    private:
++        MagnetEvents mEvent;
++        std::string mNode;
++        std::string mChannel;
++        std::string mIpAddress;
++        std::string mOriginalName;
++        std::string mHash;
++        std::string mExchangeId;
++        std::string mType;
++        std::string mTmpPath;			
++        std::string mMsg1;			
++        std::string mErrorMsg;
++        std::string mIfaceName;
++        std::string mIfaceIP;
++        std::string mIfaceMac;
++        long mFileSize;
++        long mOffset;
++        long mChunkSize;
++        int   mReason;
++        int mIntCoreTransactionId;
++        std::list<unsigned char *> *mPayload;
++        int   *mSizes;
++        std::list<std::string> *mNodes;
++        int mResult;
++};
++
++class MagnetChannelManager;
++    
++class MeshMessageReceiver
++{
++public:
++#ifdef USE_JNI
++    MeshMessageReceiver(MagnetChannelManager *pCM, JNIEnv* env);
++static JNIEnv* mEnv;
++#else
++    MeshMessageReceiver(MagnetChannelManager *pCM);
++#endif
++    ~MeshMessageReceiver();
++
++    static queue <MagnetEventData*> *mQueue;    
++#if (defined __ANDROID__ || defined __unix__)
++    pthread_t mThread; 
++    static pthread_mutex_t mutex;
++    static pthread_mutex_t mutex_cond;
++    static pthread_cond_t mCond;
++#else
++    HANDLE mThread;
++    static HANDLE mutex;
++    static HANDLE mutex_cond;	
++    static CONDITION_VARIABLE mCond;
++#endif
++    static bool m_isStoped_Core;
++
++    static bool mRunning;
++    static int mNodeCount;
++    
++    static void Exit() { mRunning = false; }
++    static int isRunning() { return mRunning; }  
++
++    void stop();
++    void start();
++
++    void push(MagnetEventData *pData);     
++
++    static void Thread_cond_Signal(void);
++    static bool isQueueEmpty();
++#ifdef __ANDROID__	
++private:
++#else
++public:
++#endif
++    static int MessMessage_Proc(MagnetChannelManager *pCM, MagnetEventData *pData);    
++    static void* threadLoop(void* arg);   
++    static void _lock(int line);
++    static void _unlock(int line);
++private:
++    MagnetChannelManager* p_ChannelManager;
++
++ };
++
++#endif
+diff --git a/magnet/agent_include/MeshMessaging.h b/magnet/agent_include/MeshMessaging.h
+new file mode 100644
+index 0000000..6690f8e
+--- /dev/null
++++ b/magnet/agent_include/MeshMessaging.h
+@@ -0,0 +1,137 @@
++/* 
++*    ChannelManager Functions
++*    ChannelManager <-> MagnetCore
++*/
++#ifndef __MeshMessaging_H__
++#define __MeshMessaging_H__
++#include "MeshMessageReceiver.h"
++#include "MagnetCore.h"
++
++#include "log.h"
++
++#include <string>
++#include <list>
++
++#if (defined (__WINDOWS__))
++
++#include <process.h>
++#ifndef _WINDOWS_
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++#undef WIN32_LEAN_AND_MEAN
++#endif
++#include <winsock2.h>
++#pragma comment(lib, "ws2_32.lib")
++
++#else
++#include <pthread.h>
++#endif
++
++using namespace std;
++
++typedef enum _NodeEvent
++{
++    CORE_LISTENING, 
++    APPEARED, 
++    DISAPPEARED,    
++}NodeEvent;
++
++typedef enum _MeshMsgState
++{
++    STATE_MESH_NONE,
++    STATE_MESH_RUN,
++    STATE_MESH_STOPING,
++    STATE_MESH_STOPED,
++} MeshMsgState;
++    
++class MeshMessaging 
++{
++
++public:
++    MeshMessaging(MeshMessageReceiver *messageReceiver);
++    ~MeshMessaging();
++
++    void init();
++#if (defined (__WINDOWS__))
++    void start(bool restart);
++#elif (defined (__UNIX__))
++    int start(bool restart);
++#endif
++    bool stop();
++    void release();    
++
++    int sendData(string toNode, string toChannel, string type, list<unsigned char*>* payload, int *parts_len);
++    int shareFile(string toNode, string toChannel, string type, string pathToFile, string exchangeId, long timeoutMsec);
++
++    int shareFile(string toNode, string toChannel, string type, string pathToFile, string exchangeId);
++    void acceptFile(string exchangeId, long chunk_timeout, int chunk_retries, long chunk_size);
++    void rejectFile(string exchangeId);
++    void cancelFile(string exchangeId);
++    void joinChannel(string name, int nSecurity);
++    void leaveChannel(string name);
++    int setIncomingTempFolder(string path);
++    void setLivenessTimeout(long timeoutMsec);
++    void discoverNode(string nodeName, string ip, int port, bool monitorNode);
++    void undiscoverNode(string nodename);
++    void useUdpDiscovery(bool value);
++    void usePeriodicBeacon(bool value);
++    void setPeriodicBeaconTimeOut(long value);
++    void useNodeExpiry(bool value);
++    void setUsingInterface(string interfaceInfo);
++    string getActiveInterface();
++	int getDiscoveryPortNumber();
++    string getDiscoveryIP();
++    
++private :
++    
++#if (defined __ANDROID__ || defined __UNIX__)
++    static void* run(void* arg);
++#else
++	unsigned int __stdcall run (void* arg);
++#endif
++
++    //MeshMessageReceiver messageReceiver;
++#if (defined (__WINDOWS__))
++    HANDLE worker;
++    HANDLE mutex;
++#elif (defined (__UNIX__))
++    pthread_t worker;
++    pthread_mutex_t mutex;
++#endif
++
++    MeshMsgState mState;
++
++    void _lock(int line);
++    void _unlock(int line);  
++};
++
++namespace meshmessageing
++{
++    void onActiveIface(string name, string ip, string mac);
++    void onCoreListening();
++    void onCoreStopped();
++    void recvData(string fromNode, string fromChannel, string type, list<unsigned char*> *payload, int *sizes);
++    void recvError(string errorMessage) ;    
++
++    void recvFileNotify(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, string type, long fileSize, string msg1) ;    
++
++    void recvFileChunk(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, string type, long fileSize, long offset) ;    
++
++    void recvFileComplete(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, string type, long fileSize, string tmpPath) ;    
++
++    void recvFileFailed(string fromNode, string fromChannel, string originalName, string hash, string exchangeId, int reason) ;    
++
++    void sendFileChunk (string toNode, string toChannel, string filename, string hash, string exchangeId, string type, long fileSize, long offset, long chunkSize);    
++
++    void sendFileComplete (string toNode, string toChannel, string filename, string hash, string exchangeId, string type, long fileSize);    
++
++    void onNodeAppeared(string fromNode) ;    
++
++    void onNodeDisappeared(string fromNode) ;    
++
++    void onNodeJoined(string fromNode, string channel, string fromIp) ;    
++
++    void onNodeParted(string fromNode, string channel, int reason) ;    
++}
++
++#endif
+diff --git a/magnet/agent_include/Platform.h b/magnet/agent_include/Platform.h
+new file mode 100644
+index 0000000..c74ab39
+--- /dev/null
++++ b/magnet/agent_include/Platform.h
+@@ -0,0 +1,42 @@
++#ifndef _Platform_H_
++#define _Platform_H_
++
++#if (defined WIN32 || defined _WIN32)
++#   undef __WINDOWS__
++#   define __WINDOWS__
++#   undef __MSDOS__
++#   define __MSDOS__
++#endif
++
++#if (defined (unix) || defined (__unix__) || defined (_POSIX_SOURCE))
++#   if (!defined (__VMS__))
++#       undef __UNIX__
++#       define __UNIX__
++#   endif
++#endif
++
++#if (defined (__WINDOWS__))
++
++#ifndef _WINDOWS_
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++#undef WIN32_LEAN_AND_MEAN
++#endif
++#include <winsock2.h>
++#pragma comment(lib, "ws2_32.lib")
++
++#   include <direct.h>
++#   include <process.h>
++#endif
++
++#if (defined (__UNIX__))
++#   include <pthread.h>
++#endif
++
++#if (defined (__WINDOWS__))
++
++#elif (defined (__UNIX__))
++#endif
++
++
++#endif
+diff --git a/magnet/agent_include/ServiceConstants.h b/magnet/agent_include/ServiceConstants.h
+new file mode 100644
+index 0000000..9852fa3
+--- /dev/null
++++ b/magnet/agent_include/ServiceConstants.h
+@@ -0,0 +1,71 @@
++#ifndef _SERVICE_CONSTANTS_H_
++#define _SERVICE_CONSTANTS_H_
++
++#include <iostream>
++#include <string>
++
++using namespace std;
++
++
++    const int SUPPORTED_SDK_VERSIONS[] = {6,};
++    const string PUBLIC_MAGNET_CHANNEL = "Magnet";
++
++     // interface type for the android emulator AVD 
++    const string MAGNET_SERVICE_INTERFACE_NAME_AVD = "eth0";	 
++    const string MAGNET_SERVICE_PACKAGE_NAME = "com.samsung.magnet";
++
++    typedef enum _ServiceEvent{
++        LISTENING,
++        PEERS,
++        NO_PEERS,
++        JOIN,
++        LEAVE,
++        STOPPED,
++        START_FAILURE,
++    } ServiceEvent;
++
++    const int REASON_MAGNET_CORE_NOT_INIT = -1;
++    const int REASON_MAGNET_CORE_FAILED = -2;
++    	
++    const int REASON_MAGNET_CORE_TIMEOUT = -3;
++        
++    const int REASON_TRANSACTION_EXPIRED = -4;
++    	
++    const int REASON_CHANNEL_NOT_FOUND = -5;
++
++    const int REASON_FILE_NOT_FOUND = -6;
++
++    const int REASON_TRANSACTION_ONGOING = 1;
++
++    const int CORE_CREATE = 1000;
++    const int CORE_CREATE_FAIL_EAGAIN = CORE_CREATE + 1;
++    const int CORE_CREATE_FAIL_EINVAL = CORE_CREATE + 2;
++    const int CORE_CREATE_FAIL_EPERM = CORE_CREATE + 3;
++    const int CORE_CREATE_FAIL_UNKNOWN = CORE_CREATE + 4;
++
++    const int JOIN_CHANNEL = 2000;
++    const int CHANNEL_NAME_EMPTY_IN_JOIN = JOIN_CHANNEL + 1;
++    const int INVALID_CHANNEL_NAME_IN_JOIN = JOIN_CHANNEL + 2;
++
++    const int DISCOVERY_IN_CHANNEL = 3000;
++    const int INVALID_IP_ADDRESS_IN_DISCOVERY = DISCOVERY_IN_CHANNEL + 1;
++    const int INVALID_NODE_NAME_IN_DISCOVERY = DISCOVERY_IN_CHANNEL + 2;
++    const int INVALID_PORT_NUMBER_IN_DISCOVERY = DISCOVERY_IN_CHANNEL + 3;
++
++    const int SEND_DATA_IN_CHANNEL = 4000;
++    const int CHANNEL_NAME_EMPTY_IN_SEND_DATA = SEND_DATA_IN_CHANNEL + 1;
++    const int MESSAGE_TYPE_EMPTY_IN_SEND_DATA = SEND_DATA_IN_CHANNEL + 2;
++
++
++    const int SHARE_FILE_IN_CHANNEL = 5000;
++    const int PEER_NOT_FOUND      = SHARE_FILE_IN_CHANNEL + 1;
++    const int MEMORY_ALLOC_FAIL = SHARE_FILE_IN_CHANNEL + 2;
++    const int FILE_CREATE_FAIL     = SHARE_FILE_IN_CHANNEL + 3;	
++    const int INVALID_FILE_SIZE_1    = SHARE_FILE_IN_CHANNEL + 4;  //INVALID_FILE_SIZE 는 window 에서 default로 사용하는것임 
++    const int INVALID_TRANSFER_MSG = SHARE_FILE_IN_CHANNEL + 5;	
++    const int TRANSFER_TIME_OUT = SHARE_FILE_IN_CHANNEL + 6;	
++    const int TRANSFER_SHARE_PREPARE = SHARE_FILE_IN_CHANNEL + 7;	
++	
++    const int FILE_REJECT = SHARE_FILE_IN_CHANNEL + 11;	
++    const int FILE_CANCEL = SHARE_FILE_IN_CHANNEL + 12;
++#endif
+diff --git a/magnet/agent_include/log.h b/magnet/agent_include/log.h
+new file mode 100644
+index 0000000..54de1a8
+--- /dev/null
++++ b/magnet/agent_include/log.h
+@@ -0,0 +1,44 @@
++#ifndef __LOG_H__
++#define __LOG_H__
++
++#ifdef __ANDROID__
++#   include <android/log.h>
++#   define LOG_ALWAYS(level, application, fmt, ...) __android_log_print(level, application, fmt, ##__VA_ARGS__)
++#else
++#   define LOG_ALWAYS(level, application, fmt, ...) fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
++#endif
++
++#ifndef DEBUG_OUTPUT
++#    define MAGNET_LOG_FATAL   0
++#    define MAGNET_LOG_ERROR   0
++#    define MAGNET_LOG_VERBOSE 0
++#    define MAGNET_LOG_DEBUG 0
++
++#    define LOG_PRINT(level, application, fmt, ...)
++#    define LOG_PRINT_DEBUG(level, application, fmt, ...)
++#    define LOG_WRITE(level, application, message)
++#else
++
++#    ifdef __ANDROID__
++#        define MAGNET_LOG_FATAL   ANDROID_LOG_FATAL
++#        define MAGNET_LOG_ERROR   ANDROID_LOG_ERROR
++#        define MAGNET_LOG_VERBOSE ANDROID_LOG_VERBOSE
++#        define MAGNET_LOG_DEBUG ANDROID_LOG_DEBUG
++
++#        define LOG_PRINT(level, application, fmt, ...) __android_log_print(level, application, fmt, ##__VA_ARGS__)
++#        define LOG_PRINT_DEBUG(level, application, fmt, ...) __android_log_print(level, application, fmt, ##__VA_ARGS__)
++#        define LOG_WRITE(level, application, message) __android_log_write(level, application, message)
++#    else
++#        define MAGNET_LOG_FATAL   0
++#        define MAGNET_LOG_ERROR   0
++#        define MAGNET_LOG_VERBOSE 0
++#        define MAGNET_LOG_DEBUG 0
++
++#        define LOG_PRINT(level, application, fmt, ...) fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
++#        define LOG_PRINT_DEBUG(level, application, fmt, ...) fprintf (stderr, "[libmagnet] "fmt"\n", ##__VA_ARGS__)
++#        define LOG_WRITE(level, application, message) fprintf (stderr, "[libmagnet] "message"\n")
++#    endif
++#endif
++
++
++#endif
+diff --git a/magnet/agent_include/stringconverter.h b/magnet/agent_include/stringconverter.h
+new file mode 100644
+index 0000000..17b0d01
+--- /dev/null
++++ b/magnet/agent_include/stringconverter.h
+@@ -0,0 +1,24 @@
++#pragma once
++
++#include <sstream>
++
++class StringConverterHelper
++{
++public:
++	template<typename T>
++	static std::string toString(const T &subject)
++	{
++		std::stringstream ss;
++		ss << subject;
++		return ss.str();
++	}
++
++	template<typename T>
++	static T fromString(const std::string &subject)
++	{
++		std::stringstream ss(subject);
++		T target;
++		ss >> target;
++		return target;
++	}
++};
+diff --git a/magnet/core_include/FileTransferFetch.h b/magnet/core_include/FileTransferFetch.h
+new file mode 100644
+index 0000000..d56aaf0
+--- /dev/null
++++ b/magnet/core_include/FileTransferFetch.h
+@@ -0,0 +1,17 @@
++#ifndef __FileTransferFetch_H__
++#define __FileTransferFetch_H__
++#include "MagnetCore.h"
++
++file_fetch_t* file_fetch_new (zmsg_t *msg, const char *tmp_path, long chunk_timeout, int chunk_retries, long chunk_size, int*error_code);
++ void file_fetch_destroy (file_fetch_t **fetch);
++ void file_fetch_properties_destroy (file_fetch_properties_t **p);
++ void file_fetch_add_duplicate (file_fetch_t *fetch, zmsg_t *msg);
++ void file_fetch_properties_clear (file_fetch_properties_t *p);
++ magnet_peer_t * peer_get (zhash_t *peer_connections, zctx_t *ctx, const char *ip, const char *port);
++void peer_attach_fetch (magnet_peer_t *peer, file_fetch_t *fetch);
++void peer_detach_fetch (magnet_peer_t *peer, file_fetch_t *fetch);
++file_fetch_t* peer_find_fetch (magnet_peer_t *peer, const char *path, const char *hash, size_t siz);
++file_fetch_t *peer_find_fetch (magnet_peer_t *peer, const char *path, const char *hash, size_t size);
++void peer_set_all_fail(zhash_t *peer_connections);
++
++#endif
+diff --git a/magnet/core_include/FileTransferIO.h b/magnet/core_include/FileTransferIO.h
+new file mode 100644
+index 0000000..7eaeec7
+--- /dev/null
++++ b/magnet/core_include/FileTransferIO.h
+@@ -0,0 +1,14 @@
++#ifndef __FileTransferIO_H__
++#define __FileTransferIO_H__
++#include "MagnetCore.h"
++
++size_t handle_dealer_activity (zhash_t *peer_connections, zmq_pollitem_t *pollset, size_t poll_size, int check_expire);
++zmq_pollitem_t * shrink_sparse_pollset (zmq_pollitem_t **pollset, size_t *poll_size, size_t deleted);
++void expire_active_transfers (void *pipe, zhash_t *outgoing_transfers);
++void send_finish_message (void *pipe, file_fetch_t *fetch, const char *status);
++zmsg_t* handle_head_request (zhash_t *outgoing_transfers, zmsg_t *request);
++zmsg_t* handle_get_request (void *pipe, zhash_t *outgoing_transfers, zmsg_t *request);
++void file_notify_fail_msg_to_core(void* pipe, char* channel, char* node, char* type, char* exchangeid, char* path, char *hash, size_t offset, int reason);
++
++extern void file_transfer_properties_destroy (file_transfer_properties_t **properties);
++#endif
+diff --git a/magnet/core_include/FileTransferThread.h b/magnet/core_include/FileTransferThread.h
+new file mode 100644
+index 0000000..f1d238d
+--- /dev/null
++++ b/magnet/core_include/FileTransferThread.h
+@@ -0,0 +1,9 @@
++#ifndef __FileTransferThread_h__
++#define __FileTransferThread_h__
++
++#include "MagnetCore.h"
++
++void *transfer_thread_new (zctx_t *ctx);
++void transfer_run_fn (void *args, zctx_t *ctx, void *pipe);
++
++#endif
+diff --git a/magnet/core_include/MagnetCallBack.h b/magnet/core_include/MagnetCallBack.h
+new file mode 100644
+index 0000000..d8b676a
+--- /dev/null
++++ b/magnet/core_include/MagnetCallBack.h
+@@ -0,0 +1,12 @@
++#include "MagnetCore.h"
++
++void call_rcv_data (cached_env *cached, magnet_msg_t *mag);
++void call_rcv_notify (struct cached_env *cached, magnet_file_msg_t *mag);
++void call_rcv_chunk (struct cached_env *cached, zmsg_t *msg);
++void call_rcv_file (struct cached_env *cached, zmsg_t *msg);
++void call_rcv_file_failed (struct cached_env *cached, zmsg_t *msg, int error);
++void call_sent_chunk (struct cached_env *cached, zmsg_t *msg);
++void call_sent_file (struct cached_env *cached, zmsg_t *msg);
++void call_disappear (cached_env *cached, peer_t *peer);
++void call_joined_channel (cached_env *cached, const char *nodename_c, const char *channel_c, const char *ipaddress_c);
++void call_parted_channel (cached_env *cached, const char *nodename_c, const char *channel_c, const int reason);
+diff --git a/magnet/core_include/MagnetCore.h b/magnet/core_include/MagnetCore.h
+new file mode 100644
+index 0000000..9226a9d
+--- /dev/null
++++ b/magnet/core_include/MagnetCore.h
+@@ -0,0 +1,109 @@
++#pragma once
++#include <string>
++
++#ifdef ZMQ_STATIC_LIBRARY
++#include "zmq.h"
++#include "czmq.h"
++#else
++#include <zmq.h>
++#include <czmq.h>
++#endif
++
++#if (defined (__WINDOWS__))
++#include <winsock2.h>
++#elif (defined (__UNIX__) || defined (__ANDROID__))
++#if defined (__ANDROID__)
++#include <linux/wireless.h>
++#endif
++#include <netinet/in.h>
++#include <net/if.h>
++#else
++    #error
++#endif
++
++#include "log.h"
++#include "constants.h"
++#include "MagnetStruct.h"
++#include "MagnetUtil.h"
++#include "MagnetMsg.h"
++#include "MagnetUdp.h"
++#include "MagnetPeer.h"
++#include "MagnetSend.h"
++#include "MagnetCallBack.h"
++#include "FileTransferThread.h"
++#include "FileTransferIO.h"
++#include "FileTransferFetch.h"
++
++enum {
++    DISAPPEAR_NONE = 0,
++    // expected leave
++    DISAPPEAR_EXPECTED_LEAVE = 1,
++    // unexpected leave
++    DISAPPEAR_UNEXPECTED_LEAVE = 2,
++    // case of network re-connect or ip-based discoverNode
++    DISAPPEAR_RECONNECT = 3,
++    // call undiscoverNode
++    DISAPPEAR_UNDISCOVER = 4,
++    // received "HALT" msg from remote side node.
++    DISAPPEAR_RECV_HALT = 5
++};
++
++void notify_node_disappear (cached_env *cached, peer_t *peer);
++int getMagnetSeqNum(void);
++
++// 2013.02.19 Merge from cozybit : magnet-fix-capi
++#ifndef tblsize(x)
++#define tblsize(x)      (sizeof (x) / sizeof ((x) [0]))
++#endif
++// 2013.02.19 Merge from cozybit : magnet-fix-capi
++
++#define update_mtime(my_struct) (my_struct->m_time = zclock_time ())
++
++using namespace std;
++
++extern char tmp_path_default [PATH_MAX];
++
++
++static int debug_verbose = 1;
++
++extern net_interface_info selected_info;
++
++extern char router_ip[INET_ADDRSTRLEN];
++extern bool isEmulator;
++static int fixedPubPortChecksumBase = 100000;
++
++class magnet_core_t
++{
++    public:
++        magnet_core_t();
++        ~magnet_core_t();
++		
++        static void print_zmsg(char *p, zmsg_t *msg);		
++        int init();       
++        void start();
++        int stop();
++        int release();
++        void setUsingInterface(string interfaceInfo);
++        char* getActiveInterface();
++        string getLocalName();
++        int getDiscovery_PortNumber();
++        string getDiscovery_IP();
++        void set_UDP_DiscoverMode(bool value);
++        void set_Node_Expiry(bool value);
++        void set_PeriodicBeacon(bool value);
++        void set_PeriodicBeacon_TimeOut(long value);
++        /*
++        void stop();
++        void release();
++        */
++    private:
++        struct cached_env mCached;
++        zctx_t *mCtx;
++};
++
++//twkim temporary
++#ifdef WINAPI_PARTITION_PHONE_RESTRICTED
++#define zsocket_disconnect(socket, fmt, ...)
++#endif
++
++#include "MeshMessaging.h"
+\ No newline at end of file
+diff --git a/magnet/core_include/MagnetMsg.h b/magnet/core_include/MagnetMsg.h
+new file mode 100644
+index 0000000..cfcf45a
+--- /dev/null
++++ b/magnet/core_include/MagnetMsg.h
+@@ -0,0 +1,26 @@
++#ifndef __MagnetMsg_H__
++#define __MagnetMsg_H__
++
++#include "MagnetCore.h"
++
++//  Destroy Magnet message
++void magnet_msg_destroy (magnet_msg_t **mag);
++//  Destroy Magnet file message
++void magnet_file_msg_destroy (magnet_file_msg_t **fmag);
++void magnet_file_msg_free (void *item);
++magnet_file_msg_t * magnet_file_msg_parse (magnet_msg_t *mag);
++// Parses zmsg_t to magnet_msg_t. The magnet_msg_t will take ownership
++// of the zmsg_t and will free it during destruction
++magnet_msg_t * magnet_msg_parse (zmsg_t *msg);
++// 2013.02.19 Merge from cozybit : magnet-fix-capi
++// Unparses a magnet_msg_t and creates a zmsg_t
++zmsg_t * magnet_msg_unparse (magnet_msg_t *mag);
++zmsg_t * zmsg_new_magnet_head (char *origin, magnet_dst_type_t dst_t,
++                               char *destination, char *channel,
++                               magnet_frm_type_t frm_t);
++// 2013.02.19 Merge from cozybit : magnet-fix-capi
++// Creates zmsg_t from magnet_msg_t
++zmsg_t * magnet_file_msg_unparse (magnet_file_msg_t *fmag);
++bool parse_heartbeat_message (char *message, discovery_t *discovery, cached_env *cached);
++
++#endif
+\ No newline at end of file
+diff --git a/magnet/core_include/MagnetPeer.h b/magnet/core_include/MagnetPeer.h
+new file mode 100644
+index 0000000..9c12885
+--- /dev/null
++++ b/magnet/core_include/MagnetPeer.h
+@@ -0,0 +1,12 @@
++#ifndef __MagnetPeer_H__
++#define __MagnetPeer_H__
++
++#include "MagnetCore.h"
++
++void set_reconnect_backoff (void *socket);
++void peer_free (void *item);
++void handle_peer_updates (cached_env *cached, peer_t *peer, int64_t time_now, int update_channels);
++peer_t * peer_new (cached_env *cached, zctx_t *context, discovery_t *discovery, void *subscriber);
++void expire_peers (cached_env *cached);
++
++#endif
+\ No newline at end of file
+diff --git a/magnet/core_include/MagnetSend.h b/magnet/core_include/MagnetSend.h
+new file mode 100644
+index 0000000..e9cfc0e
+--- /dev/null
++++ b/magnet/core_include/MagnetSend.h
+@@ -0,0 +1,17 @@
++#ifndef __MagnetSend_H__
++#define __MagnetSend_H__
++
++#include "MagnetCore.h"
++//  Ask peer if it's still alive
++//
++void send_beacon_request (cached_env *cached, peer_t *peer);
++void send_beacon_response (cached_env *cached, peer_t *peer);
++//  Ask peer for a list of its channels
++void send_channels_request (cached_env *cached, peer_t *peer);
++//  Reply to peer with list of channels
++void send_channels_response (cached_env *cached, peer_t *peer);
++void send_discovery_message (cached_env *cached, peer_t *peer);
++void broadcast_halt (cached_env *cached);
++void send_nodename_message(cached_env *cached, peer_t *peer, bool bReq);
++void send_channels_update (cached_env *cached, peer_t *peer);
++#endif
+diff --git a/magnet/core_include/MagnetStruct.h b/magnet/core_include/MagnetStruct.h
+new file mode 100644
+index 0000000..363dfbb
+--- /dev/null
++++ b/magnet/core_include/MagnetStruct.h
+@@ -0,0 +1,270 @@
++#ifndef __MagnetStruct_H__
++#define __MagnetStruct_H__
++
++struct cached_env {
++	zhash_t *peers;
++	zhash_t *channels;
++	zhash_t *pending_f;
++	int checksum;
++	char nodename [NODENAME_LEN + 1];
++	void *publisher;                //  Publishes to channels
++	void *subscriber;               //  Subscribes to channels
++	bool use_udp_discovery;
++	bool use_node_expiry;
++	long liveness_timeout;
++	char *ipaddress;                //  My IP address
++	int pub_port;                   //  My PUB port
++	int pull_port;                  //  My PULL port, or zero
++	bool use_periodic_beacon;       //  sending periodic beacon
++	long periodic_beacon_timeout;
++	zctx_t *ctx;
++};
++
++// Peer info type
++typedef struct peer_info_s {
++    zctx_t *context;                //  ZeroMQ context
++    int64_t last_seen;
++    int64_t last_channel_request;
++    zhash_t *channels;
++    zhash_t *shared_channels;
++    int waiting_beacon;
++    int channel_list_retries;
++    void *outgoing;                 //  PUSH socket to peer
++    //  Information from UDP heartbeat packet
++    int pub_port;                   //  Peer PUB port
++    int pull_port;                  //  Peer PULL port, or zero
++    char *ipaddress;                //  Peer IP address
++    char *nodename;                 //  Peer nodename
++    char *checksum;                 //  Checksum of all channels
++    bool monitor_node;
++    bool bRecreateOutgoing;         //  need to Re-Create Outgoing Socket
++    int reasonOfParted;             //  reason of parted channel
++} peer_t;
++
++typedef struct _discovery_t {
++    int pub_port;
++    int pull_port;
++    char ipaddress [INET_ADDRSTRLEN];
++    char nodename [NODENAME_BUFSIZE+1];
++    char checksum [CHECKSUM_LEN + 1];
++    bool monitor_node;
++} discovery_t;
++
++// 2013.02.19 Merge from cozybit : magnet-fix-capi
++typedef enum _magnet_dst_type_t {
++    MAGNET_DST_UNKNOWN,
++    MAGNET_DST_DIRECT,
++    MAGNET_DST_CHANNEL,
++    MAGNET_DST_GLOBAL
++} magnet_dst_type_t;
++
++typedef enum _magnet_frm_type_t {
++    MAGNET_FRM_UNKNOWN,
++    MAGNET_FRM_DATA,
++    MAGNET_FRM_FILE,
++    MAGNET_FRM_INTERNAL,
++    MAGNET_FRM_NOTIFY // THIS SHOULD BE AN INTERNAL FRAME!
++} magnet_frm_type_t;
++
++typedef struct _magnet_msg_t {
++    magnet_dst_type_t dst_t;
++    char *destination;
++    char *channel;
++    char *origin;
++    magnet_frm_type_t frm_t;
++    zmsg_t *payload;
++} magnet_msg_t;
++// 2013.02.19 Merge from cozybit : magnet-fix-capi
++
++typedef struct _magnet_file_msg_t {
++    magnet_msg_t *header;
++    char *mime_type;// 2013.02.19 Merge from cozybit : magnet-fix-capi
++    char *exchange_id;
++    char *path;
++    char *hash;
++    size_t filesize;
++    char *ip;
++    int port;
++    char *msg1;
++} magnet_file_msg_t;
++
++typedef struct _channel_peer_arg {
++    char *channel;          // The name of channel to match
++    zlist_t *peers;         // List of nodes on channel
++} channel_peer_arg;
++
++typedef struct _net_interface_info {
++    char name[MAX_NAME_LEN];
++    char ip[INET_ADDRSTRLEN];
++} net_interface_info;
++
++typedef struct _magnet_mmap_t {	
++#if (defined (__WINDOWS__))
++    HANDLE fd;
++#elif (defined (__UNIX__))
++    int fd;
++#else
++    #error
++#endif
++    size_t size;
++    void *data;
++    char *path;
++    char *hash;
++    int ref_cnt;
++#if (defined (__WINDOWS__))
++    HANDLE mmap;
++#endif
++} magnet_mmap_t;
++
++typedef struct _magnet_peer_t {
++
++    zctx_t *ctx;        // context for the socket
++
++    void *socket;       // DEALER socket connected to remote peer
++
++    int64_t m_time;     // Last time something happened on this socket
++
++    zhash_t *fetches;   // Hash of active fetches keyed with
++                        // name-checksum pair
++                        
++    zlist_t *chunk_order; // Order to receive chunks in
++
++    int has_pollitem;   // does the peer have pollset entry
++
++    char peer_key [48];
++    char poll_key [48];
++
++    char *ip;          // DALER socket ip
++    char *port;        // DALER socket port
++
++} magnet_peer_t;
++
++typedef struct _file_transfer_properties_t {
++    char *exchange_id;
++    char *type;
++    char *destination;
++    char *channel;
++    int64_t m_time;        // Last access to this struct, used for timing out transfers    
++    size_t offset;         // The current offset    
++} file_transfer_properties_t;
++
++typedef struct _file_transfer_t {
++    magnet_mmap_t *m;      // mmap data
++    char *key;             // The key of the transfer in outgoing_transfer table
++    long timeout;          // Timeout
++    size_t filesize;       // File size
++    zlist_t *properties;   // transfer properties, keep a list if same file is shared multiple times
++} file_transfer_t;
++
++typedef struct _file_fetch_properties_t {
++
++    char *tmp_name;    // Temp name, this is overridden for duplicates
++
++    char *msg_channel; // Channel where the file was sent to
++    char *msg_origin;  // Origin of the transmission
++    char *msg_type;    // Mime-type
++    char *msg_exch_id; // Exchange id used
++    int canceled;
++
++} file_fetch_properties_t;
++
++// Used as a simple buffer for chunks arriving out of order
++typedef struct _file_fetch_buffer_t {
++    size_t offset;
++    zframe_t *data;
++} file_fetch_buffer_t;
++
++// DONE:     state == 0
++// ACTIVE:   state > STATE_ACTIVE_MIN && state < STATE_ACTIVE_MAX
++// FAILURES: state >= STATE_FAILED
++typedef enum _transfer_state_t {
++    STATE_DONE = 0,
++    STATE_NEED_SEND = 1,
++    STATE_WAITING_REPLY = 2,
++    STATE_FAILED = 20,
++    STATE_CANCELED = 21
++} transfer_state_t;
++
++typedef enum _transfer_error_t{
++    MAGNET_EVENT_NONE = 0,
++    MAGNET_EVENT_PEER_NOT_FOUND=1,
++    MAGNET_EVENT_MEMORY_ALLOC=2,
++    MAGNET_EVENT_FILE_CREATE=3,
++    MAGNET_EVENT_FILE_SIZE=4,
++    MAGNET_EVENT_FAIL_MSG = 5,
++    MAGNET_EVENT_TIMEOUT = 6, //window에서 ERROR_TIMEOUT 이 사용되므로 ERROR_TIMEOUT_1을 사용함
++    MAGNET_EVENT_PREPARE = 7,
++    MAGNET_EVENT_REJECT=11,
++    MAGNET_EVENT_CANCEL=12,    
++    MAGNET_EVENT_UNKNOWN = 99,    
++}transfer_error_t;
++
++typedef struct _file_fetch_t {
++
++    // File properties
++    char *path;         // Path of the remote file
++    char *hash;         // The file hash
++    char *tmp_path;     // The configured temp path
++    FILE *handle;       // Local file handle for the transfer
++
++    // Transfer properties
++    size_t fsize;       // The size of the file
++    size_t offset;      // The offset where the read is
++    size_t chunk_size;  // what size chunk to request
++
++    file_fetch_buffer_t chunk_buffer; // Buffer for chunks that were received out of order
++
++    // State related params
++    int head_sent;      // Has HEAD been sent for this request 1/0
++    int retries;        // How many failures in a row
++    transfer_state_t state;  // Fetch state
++    int64_t m_time;     // Last time something happened on this fetch
++
++    long chunk_timeout;  // Timeout for each chunk
++    int chunk_retries;  // How many times to retry chunk in addition to the initial try
++
++    // Magnet properties for sending notifications
++    file_fetch_properties_t properties;
++
++    // List of duplicate requests
++    zlist_t *duplicates;
++
++} file_fetch_t;
++
++typedef struct _transfer_cancel_arg_t {
++    zhash_t *outgoing_transfers;
++    char *exchange_id;
++    char *action;
++    void *pipe;
++} transfer_cancel_arg_t;
++
++typedef struct _fetch_cancel_arg_t {
++    zhash_t *peer_connections;
++    char *exchange_id;
++    magnet_peer_t *peer;
++    char *action;	
++    void *pipe;	
++} fetch_cancel_arg_t;
++
++typedef struct _transfer_fail_arg_t {
++    zhash_t *outgoing_transfers;
++    void *pipe;
++} transfer_fail_arg_t;
++
++typedef enum _channel_zhash_operator_t {
++    CHANNEL_DIFF,
++    CHANNEL_INTERSECT
++} channel_zhash_operator_t;
++
++typedef struct _channel_zhash_arg_t {
++    zhash_t *compare;
++    zhash_t *result;
++    channel_zhash_operator_t mode;
++} channel_zhash_arg_t;
++
++typedef struct _notify_callback_arg_t {
++    cached_env *env;
++    peer_t *peer;
++} notify_callback_arg_t;
++
++#endif
+diff --git a/magnet/core_include/MagnetUdp.h b/magnet/core_include/MagnetUdp.h
+new file mode 100644
+index 0000000..4a2742c
+--- /dev/null
++++ b/magnet/core_include/MagnetUdp.h
+@@ -0,0 +1,10 @@
++#ifndef __MagnetUdp_H__
++#define __MagnetUdp_H__
++
++#include "MagnetCore.h"
++
++int create_udp_mcast_recv_socket(sockaddr_in *bcast_sa);
++int mcast_send (int fd, struct sockaddr_in *bcast_sa, char *message);
++ssize_t mcast_recv (int fd, char *buffer, char *sender_ip);
++
++#endif
+diff --git a/magnet/core_include/MagnetUtil.h b/magnet/core_include/MagnetUtil.h
+new file mode 100644
+index 0000000..ed312f3
+--- /dev/null
++++ b/magnet/core_include/MagnetUtil.h
+@@ -0,0 +1,40 @@
++#ifndef __MagnetUtil_H__
++#define __MagnetUtil_H__
++
++#include "MagnetCore.h"
++
++int select_interface (struct sockaddr_in *ip_sa, struct sockaddr_in *bcast_sa, char *buffer);
++int backoff_time (size_t nodes);
++
++int msnprintf (char **retval, int max_size, const char *format, ...);
++int magnet_stat (struct stat *sb, const char *path);
++int magnet_fcopy (FILE *source, FILE *destination);
++size_t magnet_filesize (const char *path);
++magnet_mmap_t* magnet_prepare_file_share (const char *path);
++void magnet_mmap_destroy (magnet_mmap_t **m);
++//char* magnet_create_hash (const char *buffer, size_t buffer_size);
++int magnet_verify_hash (const char *buffer, size_t buffer_size, const char *compare_hash);
++//void magnet_madvise_seq (void *ptr, size_t position, size_t advise_size);
++// Generate a random port between the range of 10000-30000
++int magnet_random_port (void);
++// Get basename from an absolute path
++char* magnet_basename (char *path);
++int magnet_zhash_clear (zhash_t *hash);
++int magnet_zhash_append (zhash_t *target, zhash_t *source);
++zmsg_t* magnet_recv_nowait (void *pipe);
++int create_temp_file (const char *path, FILE **handle, char **name);
++void makeEmulNodeName(char *temp_buffer);
++void makeNodeName(unsigned char *mac, char *buffer);
++void NodeNametoMac(unsigned char *mac, char *buffer);
++bool isValidLetter(char c);
++#if (defined (__WINDOWS__))
++int __pc_log_write(int prio, const char *tag, const char *msg);
++int __pc_log_print(int prio, const char *tag, const char *fmt, ...);
++#endif
++#if (defined (__WINDOWS__))
++void CharToWChar(const char* szSource, WCHAR* szDes);
++void WCharToChar(WCHAR* wszSrc, char* szDes);
++int ANSIToUTF8(char *srcANSI, char *destUTF8);
++char* UTF8toANSI(char *srcUTF8);
++#endif
++#endif
+diff --git a/magnet/core_include/Native.h b/magnet/core_include/Native.h
+new file mode 100644
+index 0000000..d5db79c
+--- /dev/null
++++ b/magnet/core_include/Native.h
+@@ -0,0 +1,20 @@
++#ifndef __NATIVE_H_INCLUDE__
++#define __NATIVE_H_INCLUDE__
++#include "MagnetCore.h"
++
++int join_channel (string channel, int security);
++int leave_channel (string channel);
++int send_data (string destination, string channel, string type, list<unsigned char*>* payload, int *parts_len);
++int share_file (string destination, string channel, string type, string path, string exchange_id, long timeout_msec);
++void accept_file(string exchange_id, long chunk_timeout_msec, int chunk_retries, long chunk_size);
++void reject_file(string exchange_id);
++void cancel_file(string exchange_id);
++int set_tmp_folder(string path);
++void set_liveness_timeout(long timeout_msec);
++void discover_node(string nodeName, string ip, int port, bool monitor_node);
++void undiscover_node(string nodename);
++void set_UseUdpDiscovery(bool value);
++void use_node_expiry(bool value);
++void set_UsePeriodicBeacon(bool value);
++void set_PeriodicBeaconTimeOut(long value);
++#endif
+diff --git a/magnet/core_include/constants.h b/magnet/core_include/constants.h
+new file mode 100644
+index 0000000..f7b1be6
+--- /dev/null
++++ b/magnet/core_include/constants.h
+@@ -0,0 +1,114 @@
++/**
++ * This is the main "configuration" file for constants
++ */
++
++#ifndef _CONSTANTS_H_
++# define _CONSTANTS_H_
++#   if (defined (__WINDOWS__))
++#include <windows.h>
++#include <WinSock.h>
++#include <tchar.h>
++#include <ws2tcpip.h>
++#include <stdio.h>
++#include <string.h>
++#define PATH_MAX 255
++#define strdup _strdup
++#define strncpy strncpy_s
++#define open _open
++#define close _close
++#define fdopen _fdopen
++#define unlink _unlink
++#define getpid _getpid
++#	else
++#include <sys/types.h>
++#include <sys/ipc.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <sys/time.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <stdio.h>
++#include <czmq.h>
++#	endif
++// Some magic constants
++#define CHECKSUM_LEN            22
++#define NODENAME_LEN            16
++#define NODENAME_BUFSIZE        24
++
++//  For UDP heartbeating subprotocol
++#define HEARTBEAT_PROTOCOL      "02"
++#define HEARTBEAT_PORT          9006
++#define HEARTBEAT_INTERVAL      1000    //  msecs
++#define HEARTBEAT_MAXSIZE       255     //  Maximum size of discovery message
++#define MAX_HEARTBEAT_FIELD_CNT 	16   //  optional fields are added for emulator case only
++
++#define EMULATOR_PEER_IP      "EIP:"   // Emulator Peer IP Address
++#define EMULATOR_ROUTER_IP "ERI:"   // Emulator Router IP Address
++
++#define MAX_IFACE 256
++#define MAX_NAME_LEN 256
++#define MAC_STR_LEN 18
++
++// Name in the log
++#define APP_NAME1 "libmagnet"
++
++// How long it takes to expire active transfer
++#define TRANSFER_EXPIRY_MSEC 180000
++
++// How often to check for expired entries
++#define TRANSFER_EXPIRY_CHECK_MSEC 10000
++
++// The chunk size, default to 100k
++// Hack: make large enough to hold a SmartMeeting slide :) 
++#define TRANSFER_CHUNK_SIZE 305600
++
++// Transfer chunk retry
++#define TRANSFER_CHUNK_RETRIES 2
++
++// How long to wait for a chunk, 10 secs by default
++#define TRANSFER_CHUNK_RETRY_MSEC 20000
++
++// The last six 'X' are replaced with random string
++#define TMP_FILE_PATTERN "magnet.XXXXXX"
++
++// Message type for internal messages
++#define MAGNET_INTERNAL_MIME_TYPE "application/magnet-internal"
++#define MAGNET_INTERNAL_MIME_TYPE_LEN 27
++
++// The public channel
++#define MAGNET_CORE_PUBLIC_CHANNEL "Magnet"
++
++// interface type for the android emulator AVD
++const char INTERFACE_NAME_AVD[] 				= "eth0";
++const char ANDROID_AVD_IP_ADDRESS []				= "10.0.2.15";
++const char ANDROID_AVD_BCAST_INTERFACE_ADDR[] 	= "10.0.2.255";
++
++// How often to retry the channel request
++#define MAGNET_CHANNEL_RETRY_MSEC 2000
++
++// How long before peers timeout
++#define EXPIRATION_TIME_IN_MSECS 15000
++
++// After how much idle time send beacon
++#define MAGNET_BEACON_TIMEOUT 5000
++
++// Whether to send head request in xfer
++#define MAGNET_SKIP_HEAD 1
++
++// Whether to do zero copy from mmap to network
++#define MAGNET_ZERO_COPY 0
++
++// How many times to retry channel list
++#define MAGNET_CHANNEL_LIST_RETRIES 5
++
++#ifndef MAX
++#    define MAX(a, b) (((a) > (b)) ? (a) : (b))
++#endif
++#ifndef MIN
++#    define MIN(a, b) (((a) < (b)) ? (a) : (b))
++#endif
++
++#define FOREACH_CONSTNESS const
++
++#endif /* _CONSTANTS_H_ */
++
+diff --git a/magnet/native_include/Magnet.h b/magnet/native_include/Magnet.h
+new file mode 100644
+index 0000000..eba7743
+--- /dev/null
++++ b/magnet/native_include/Magnet.h
+@@ -0,0 +1,1425 @@
++#ifndef _MAGNET_H_
++# define _MAGNET_H_
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <stdlib.h>
++#include <stdbool.h>
++
++/* Export the functions */
++#if defined _WIN32
++#   if !defined MAGNET_STATIC
++#       if defined DLL_EXPORT
++#           define MAGNET_EXPORT __declspec(dllexport)
++#       else
++#           define MAGNET_EXPORT __declspec(dllimport)
++#       endif
++#   endif
++#endif
++
++#ifndef BOOL
++typedef int BOOL;
++#endif
++#ifndef TRUE
++#define TRUE  1
++#endif
++#ifndef FALSE
++#define FALSE 0
++#endif
++#ifndef streq
++#define streq(a,b) (*(a) == *(b) && strcmp ((a),(b)) == 0)
++#endif
++/* In any other case just define export as empty */
++#ifndef MAGNET_EXPORT
++#define MAGNET_EXPORT
++#endif
++
++/**
++ * @defgroup Magnet_Definition_For_Opaque_Structure Magnet Type Definition for opaque structure
++ */
++
++/**
++ * @addtogroup Magnet_Definition_For_Opaque_Structure
++ * @{
++ */
++
++/**
++ * @brief Opaque structure for magnet header
++ */
++typedef struct _stMagnetHeader stMagnetHeader;
++
++/**
++ * @brief Opaque structure holding the callbacks
++ */
++typedef struct _stMagnetListener stMagnetListener;
++
++/**
++ * @brief A single data item inside the payload
++ */
++typedef struct _stMagnetData stMagnetData;
++
++/**
++ * @brief A magnet data payload
++ */
++typedef struct _stMagnetPayload stMagnetPayload;
++
++/**
++ * @brief File transfer info passed to callbacks
++ */
++typedef struct _stMagnetTransferInfo stMagnetTransferInfo;
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Definition_For_Callbacks Magnet Type Definition for callback funtions
++ */
++
++/**
++ * @addtogroup Magnet_Definition_For_Callbacks
++ * @{
++ */
++
++/**
++ * @brief Type definition function pointer for user data free callback
++ *
++ * @param[out] data pointer to the user data
++ */
++typedef void (magnetUserdataFreeCB) (void *  data);
++
++/**
++ * @brief Type definition function pointer for core listening callback
++ *
++ * This callback will happen when core is fully started and ready to listen
++ *
++ * @param[out] localName My nodename
++ */
++typedef void (magnetOnListeningCB) (const char *  localName);
++
++/**
++ * @brief Type definition function pointer for core stopped callback
++ *
++ * This callback will be received when the magnet core is fully stopped
++ *
++ */
++typedef void (magnetOnStoppedCB) ();
++
++/**
++ * @brief Type definition function pointer for on peers come callback
++ *
++ * Called when the first peer join magnet public channel
++ *
++ */
++typedef void (magnetOnPeersCB) ();
++
++/**
++ * @brief Type definition function pointer for no peers in magnet callback
++ *
++ * Called when last node leave the public channel
++ *
++ */
++typedef void (magnetOnNoPeersCB) ();
++
++/**
++ * @brief Type definition function pointer for failed core start callback
++ *
++ * If core fails to start, call this method
++ *
++ * @param[out] reason Reason of failure. Refer to MagnetErrorCode.h about the code
++ */
++ typedef void (magnetOnServiceErrorCB) (int reason);
++
++/**
++ * @brief Type definition function pointer for node joined event
++ *
++ * Called when other peer joined to a channel
++ * param header contains information about the joined node
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename and channel
++ */
++ typedef void (magnetOnJoinCB) (stMagnetHeader *  header);
++
++/**
++ * @brief Type definition function pointer for peer leaved event
++ *
++ * Called when other peer leaved from a channel
++ * param header contains information of the left node
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename and channel
++ */
++ typedef void (magnetOnLeaveCB) (stMagnetHeader *  header);
++
++/**
++ * @brief Type definition function pointer for receive data event
++ *
++ * When data is received, call this method
++ *
++ *              has information of peer's nodename, channel, and data type d
++ * @param[out] payload magnet data structure
++ */
++ typedef void (magnetOnDataReceivedCB) (stMagnetHeader *  header, stMagnetPayload *  payload);
++
++/**
++ * @brief Type definition function pointer for request file share event
++ *
++ * When a request from peer within channel is received, call this method
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename, channel, and file type of user defined
++ * @param[out] info File transfer info
++ *                     has information of file transfer(filename, hash, exchange id, filesize)
++ */
++ typedef void (magnetOnFileNotifiedCB) (stMagnetHeader *  header, stMagnetTransferInfo *  info);
++
++/**
++ * @brief Type definition function pointer for received chunk event
++ *
++ * When received chunk from share side, call this method
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename, channel, and file type of user defined
++ * @param[out] info File transfer info
++ *                     has information of file transfer(filename, hash, exchange id, filesize, offset)
++ */
++ typedef void (magnetOnChunkReceivedCB) (stMagnetHeader *  header, stMagnetTransferInfo *  info);
++
++/**
++ * @brief Type definition function pointer for file received event
++ *
++ * When a file received completely, call this method
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename, channel, and file type of user defined
++ * @param[out] info File transfer info
++ *                     has information of file transfer(filename, hash, exchange id, filesize, received path(include temporary filename))
++ */
++ typedef void (magnetOnFileReceivedCB) (stMagnetHeader *  header, stMagnetTransferInfo *  info);
++
++/**
++ * @brief Type definition function pointer for file transfer fail event
++ *
++ * When file transfer fails, call this method
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename, channel, and file type of user defined
++ * @param[out] info File transfer info
++ *                     has information of file transfer(filename, hash, exchange id, error reason)
++ */
++ typedef void (magnetOnFileFailedCB) (stMagnetHeader *  header, stMagnetTransferInfo *  info);
++
++/**
++ * @brief Type definition function pointer for sent chunk
++ *
++ * When chunk is sent to receiver, call this mehod
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename, channel, and file type of user defined
++ * @param[out] info File transfer info
++ *                     has information of file transfer(filename, hash, exchange id, filesize, offset, chunksize)
++ */
++ typedef void (magnetOnChunkSentCB) (stMagnetHeader *  header, stMagnetTransferInfo *  info);
++
++/**
++ * @brief Type definition function pointer for sent file
++ *
++ * When file is sent completely, call this method
++ *
++ * @param[out] header Opaque structure for magnet header
++ *                     has information of peer's nodename, channel, and file type of user defined
++ * @param[out] info File transfer info
++ *                     has information of file transfer(filename, hash, exchange id, filesize,)
++ */
++ typedef void (magnetOnFileSentCB) (stMagnetHeader *  header, stMagnetTransferInfo *  info);
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Interface Magnet Interface API
++ */
++
++/**
++ * @addtogroup Magnet_Interface
++ * @{
++ */
++
++/**
++ * @brief Allocates and initializes a new magnet instance.
++ *
++ * A Magnet instance must be freed with MagnetRelease() after the caller
++ * is done with it.
++ *
++ * @param[in] tmpPath Path where temporary files are stored. Must be accessible and writable by the current process
++ *
++ * @return The newly allocated magnet instance
++ */
++MAGNET_EXPORT
++    BOOL MagnetInit (const char *  tmpPath);
++
++/**
++ * @brief Runs the magnet instance.
++ *
++ * This function will block until the handle is running.
++ * It is safe to run multiple magnet handles in separate threads
++ *
++ * @return Boolean indicating whether the instance was successfully started
++ */
++MAGNET_EXPORT
++    BOOL MagnetStart ();
++
++/**
++ * @brief Stops the specified magnet instance.
++ *
++ * This function does not destroy the magnet instance. It is safe to start/stop the handle
++ * several times during it's lifecycle
++ *
++ * @return Boolean indicating whether the instance was successfully stopped
++ */
++MAGNET_EXPORT
++     BOOL MagnetStop ();
++
++/**
++ * @brief Fully stops the magnet instance and release if it's running.
++ *
++ * This function also frees the memory associated with the magnet instance.
++ * Accessing the instance after it's destroyed will case undefined behaviour
++ *
++ * @return true is destroy success, other is release fail
++ */
++MAGNET_EXPORT
++    BOOL MagnetRelease ();
++
++/**
++ * @brief Joins a given channel
++ *
++ * @param[in] channel The name of the channel to join to
++ *
++ * @return Returns a boolean indicating whether joining the channel succeeded
++*/
++MAGNET_EXPORT
++    BOOL MagnetJoinChannel (const char *  channel);
++
++/**
++ * @brief Leaves a given channel
++ *
++ * @param[in] channel The name of the channel to leave
++ *
++ * @return Returns a boolean indicating whether leaving the channel succeeded
++ */
++MAGNET_EXPORT
++    BOOL MagnetLeaveChannel (const char *  channel);
++
++/**
++ * @brief Shares a file to a node or a channel
++ *
++ * Shares a file with other nodes in the network. The source file must be readable by the
++ * current process.
++ *
++ * @param[in] header    The receiver information of destination peer and channel
++ * @param[in] filePath    Path to the file to share
++ * @param[in] timeoutMsec    Idle timeout for the fileshare. If the share is idle more than N msec it will be removed
++ *
++ * @return Exchange id for the this share. The exchange id can be used to uniquely identify this share on the sender.
++ *         The caller must deallocate the returned string using free() function.
++ */
++MAGNET_EXPORT
++    char* MagnetShareFile (stMagnetHeader *  header, const char *  filePath, long timeoutMsec);
++
++/**
++ * @brief Accept a file share from remote node
++ *
++ * Accepts a file being shared by a remote node.
++ * Usually this function is called from magnetOnFileNotifiedCB callback.
++ *
++ * @param[in] channel         The name of channel
++ * @param[in] exchangeId   The exchange id from the share notification
++ * @param[in] chunkTimeoutMsec Timeout for each file chunk
++ * @param[in] chunkRetries How many times to retry a chunk that reaches the timeout before giving up
++ * @param[in] chunkSize     How large chunks to request
++ *
++ * @return Returns a boolean indicating whether accepting the file succeeded
++ */
++MAGNET_EXPORT
++    BOOL MagnetAcceptFile (const char *  channel, const char *  exchangeId, long chunkTimeoutMsec, int chunkRetries, long chunkSize);
++
++/**
++ * @brief Rejects a file share from remote node
++ *
++ * Rejects a file being shared by a remote node.
++ * Usually this function is called from magnetOnFileNotifiedCB callback.
++ *
++ * @param[in] channel        The name of channel
++ * @param[in] exchangeId  The exchange id from the share notification
++ *
++ * @return Returns a boolean indicating whether rejecting the file succeeded
++ */
++MAGNET_EXPORT
++    BOOL MagnetRejectFile (const char *  channel, const char *  exchangeId);
++
++/**
++ * @brief Cancels an active file transfers
++ *
++ * Cancels an on-going file transfer
++ *
++ * @param[in] channel        The name of channel
++ * @param[in] exchangeId The exchange id from the share notification
++ *
++ * @return Returns a boolean indicating whether canceling the file succeeded
++ */
++MAGNET_EXPORT
++    BOOL MagnetCancelFile (const char *  channel, const char *  exchangeId);
++
++/**
++ * @brief Sends data to a remote node or channel
++ *
++ * Sends data to a remote node on the network. It's important to note that
++ * even if this function returns true, there are no guarantees that the data
++ * has been reached the remote node. In cases where there are higher reliability
++ * requirements, the use of manual acknowledgement is highly recommended.
++ *
++ * @param[in] header   The node to send the message to. Passing NULL as nodeName will cause data to be sent to all nodes on the 'channel' member
++ * @param[in] payload  The payload to send. The payload is automatically destroyed after sending. In case the payload needs to be used
++ *                                multiple times MagnetPayloadDup() can be used to duplicate the payload
++ *
++ * @return Returns a boolean indicating if the data was successfully queued for sending
++ */
++MAGNET_EXPORT
++    BOOL MagnetSendData (stMagnetHeader *  header, stMagnetPayload **  payload);
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Getter_Setter Magnet getter and setter
++ */
++
++/**
++ * @addtogroup Magnet_Getter_Setter
++ * @{
++ */
++
++/**
++ * @brief Sets the userData member
++ *
++ * The userData member of the stMagnetHandle. The purpose of this parameter is to allow passing
++ * additional information to callback functions. For example in case of JNI this could be a pointer
++ * to the Java environment. If set userData is called multiple times the free function for previous
++ * data will be invoked
++ *
++ *
++ * @param[in] userData  Opaque blob of data to associated with the handle
++ * @param[in] func        A free-function for the userData. If this parameter is non-NULL the handle will
++ *                                 automatically free the userData during destruction.
++ */
++MAGNET_EXPORT
++    void MagnetSetUserData (void *  userData, magnetUserdataFreeCB *  func);
++
++/**
++ * @brief Gets the userData member
++ *
++ * Returns the userData member of the handle set with MagnetSetUserData()
++ *
++ * @return Data associated with MagnetSetUserData() or NULL if none is set
++ */
++MAGNET_EXPORT
++    void *  MagnetGetUserData ();
++
++/**
++ * @brief Set the listener callbacks on the this handle.
++ *
++ * The instance will take ownership of the callback structure and will take care of freeing it
++ * during the destruction of the handle.
++ *
++ * @param[in] listener Magnet listener structure
++ */
++MAGNET_EXPORT
++     void MagnetSetListener (stMagnetListener *  listener);
++
++/**
++ * @brief Get the listener callback structure associated.
++ *
++ * The returned buffer is valid until the handle associated with it is destroyed
++ *
++ * @return The core listener callback structure. The caller must not free this
++ */
++MAGNET_EXPORT
++     stMagnetListener *  MagnetGetListener ();
++
++/**
++ * @brief Sets the path where temporary files are stored.
++ *
++ * The path for temporary files needs to be set before the instance is started using MagnetStart()
++ *
++ * @param[in] tmpPath Path where temporary files are stored. Must be accessible and writable by the current process
++ *
++ * @return Boolean indicating whether setting temporary path succeeded
++ */
++MAGNET_EXPORT
++    BOOL MagnetSetTmpPath (const char *  tmpPath);
++
++/**
++ * @brief Gets the path where temporary files are being stored
++ *
++ * @return Path where temporary files are stored. The returned buffer is valid
++ *             until the associated handle is destroyed
++ */
++MAGNET_EXPORT
++    const char *  MagnetGetTmpPath ();
++
++/**
++ * @brief Get list of joined channels
++ *
++ * Returns a list of channels where the current instance has joined
++ *
++ * @param[out] numChannels Number of channels in the returned array
++ *
++ * @return Channels where the current instance has joined. The caller must deallocate this using MagnetFreeChannels().
++ */
++MAGNET_EXPORT
++    char **  MagnetGetJoinedChannels (size_t *  numChannels);
++
++/**
++ * @brief Frees a channel list returned from MagneGtetJoinedChannels()
++ *
++ * @param[in] channels Channels got by MagnetGetJoinedChannels()
++ * @param[in] numChannels Number of channels in the returned array
++ */
++MAGNET_EXPORT
++    void MagnetFreeChannels (char **  channels, size_t numChannels);
++
++/**
++ * @brief Get connected nodes
++ *
++ * Get currently connected nodes in a channel
++ *
++ * @param[in]   channel      The name of channel from which to query the nodes. Passing public channel
++ *                                      will return all nodes known in the network
++ * @param[out] numNodes  Number of nodes in the returned array
++ *
++ * @return Nodes in the requested channel. The caller must deallocate this using MagnetFreeConnectedNodes()
++ */
++MAGNET_EXPORT
++    char **  MagnetGetConnectedNodes (const char *  channel, size_t *  numNodes);
++
++/**
++ * @brief Frees a channel list returned from MagnetGetConnectedNodes()
++ *
++ * @param[in] nodes Nodes got by MagnetGetConnectedNodes()
++ * @param[in] numNodes Number of nodes in the returned array
++ */
++MAGNET_EXPORT
++    void MagnetFreeConnectedNodes (char **  nodes, size_t numNodes);
++
++/**
++ * @brief Setting timeout for node expiry
++ *
++ * @param[in] timeoutMsec Time for node expiry timeout
++ */
++MAGNET_EXPORT
++    void MagnetSetLivenessTimeout (long timeoutMsec);
++
++/**
++ * @brief Setting use or not udp discover
++ *
++ * @param[in] value true is using udp discover
++ */
++MAGNET_EXPORT
++    void MagnetSetUdpDiscover (BOOL value);
++
++/**
++ * @brief Setting use or not node expiry
++ *
++ * @param[in] value True is using node expiry
++ */
++MAGNET_EXPORT
++    void MagnetSetNodeExpiry (BOOL value);
++
++
++/**
++ * @brief This function is still unstable
++ *
++ * @param[in] networkInterfaceInfo Network interface info name:ip
++ *                   name - interface name
++ *                   ip - ipv4 ip address
++ *                   - eth0;*
++ *                   - *;10.0.0.2
++ *                   Star will signify "any", for example the second example reads "using interface eth0 and any ip".
++ *                   This would bind to first ip on the matching nic.
++ *
++ * @return Returns false if the format does not match
++ */
++MAGNET_EXPORT
++    BOOL MagnetSetUsingNetworkInterface (const char *  networkInterfaceInfo);
++
++/**
++ * @brief Get activated network interface
++ *
++ * @return Return Using network interface name
++ */
++MAGNET_EXPORT
++    const char *  MagnetGetUsingInterface ();
++
++/**
++ * @brief Set network available state
++ *
++ * @param[in] connected True is connected, False is disconnected
++ */
++MAGNET_EXPORT
++    void MagnetSetConnectedState (BOOL connected);
++
++/**
++ * @brief Get current magnet state
++ *
++ * @return Returns magnet state
++ */
++MAGNET_EXPORT
++    int MagnetGetState();
++
++/**
++ * @brief Get my port
++ *
++ * @return the TCP port used for messaging
++ */
++MAGNET_EXPORT
++    int MagnetGetMyPortNumber();
++
++/**
++ * @brief Get my ip
++ *
++ * @return the IP address of the interface where magnet instance is bounded.
++ */
++MAGNET_EXPORT
++    const char *  MagnetGetMyIP();
++
++/**
++ * @brief Get peers IP address by nodemae
++ *
++ * @param[in] nodeName  Target nodename
++ * @param[in] channel  Target channel
++ *
++ * @return IP address
++ */
++MAGNET_EXPORT
++    const char *  MagnetGetNodeIpAddress(const char *  nodeName, const char *  channel);
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Payload_API Magnet API for Magnet payload
++ */
++
++/**
++ * @addtogroup Magnet_Payload_API
++ * @{
++ */
++
++/**
++ * @brief Allocated and initialize a new magnet payload
++ *
++ * Allocates and initializes a new payload object. The object must be
++ * freed with MagnetPayloadDestroy() after the caller is done with it
++ *
++ * @return Returns a pointer to the newly allocated payload
++ */
++MAGNET_EXPORT
++    stMagnetPayload *  MagnetPayloadInit ();
++
++/**
++ * @brief Creates a copy of the payload and the data inside it
++ *
++ * @param[in] payload Payload to be copied
++ */
++MAGNET_EXPORT
++    stMagnetPayload *  MagnetPayloadDup (stMagnetPayload *  payload);
++
++/**
++ * @brief Get number of data items in the payload
++ *
++ * Each payload composes of one or more data items. This function will
++ * return the count of data items in the payload.
++ *
++ * @param[in] payload Payload to be counted
++ *
++ * @return The amount of data items in the payload object
++ */
++MAGNET_EXPORT
++    size_t MagnetPayloadCount (stMagnetPayload *  payload);
++
++/**
++ * @brief Appends a data item into the payload
++ *
++ * This function will add a data item into the payload. The payload takes
++ * ownership of the stMagnetData object
++ *
++ * @param[in] payload Payload to be taken
++ * @param[in] data      Data to be appended
++ *
++ * @return Returns a boolean whether adding the data succeeded
++ */
++MAGNET_EXPORT
++    BOOL MagnetPayloadAppend (stMagnetPayload *  payload, stMagnetData *  data);
++
++/**
++ * @brief Appends a binary data into the payload
++ *
++ * This function will add a blob of data into the payload. The payload
++ * object will automatically wrap the data into stMagnetData object.
++ *
++ * @param[in] payload  Payload to be taken
++ * @param[in] data       Data to be appended
++ * @param[in] dataSize Size of data
++ *
++ * @return Returns a boolean whether adding the data succeeded
++ */
++MAGNET_EXPORT
++    BOOL MagnetPayloadAppendBlob (stMagnetPayload *  payload, unsigned char *  data, size_t dataSize);
++
++/**
++ * @brief Rewinds the internal iterator to first element in the payload
++ *
++ * This function rewinds the iterator to the first element. The common usage
++ * of this function is:
++ *
++ *        stMagnetData *d;
++ *        for (d = MagnetPayloadFirst (p) ;d != NULL; d = MagnetPayloadNext (p)) {
++ *
++ *            size_t siz;
++ *            unsigned char *contents = MagnetDataGetContents (d, &siz);
++ *
++ *            if (contents) {
++ *                  // Do stuff
++ *            }
++ *        }
++ *
++ * @param[in] payload  Payload
++ *
++ * @return Returns first element in the payload or NULL if the payload is empty
++ *
++ */
++MAGNET_EXPORT
++    stMagnetData *  MagnetPayloadFirst (stMagnetPayload *  payload);
++
++/**
++ * @brief Moves the internal pointer to next data element
++ *
++ * Moves the internal pointer in the payload to the next data element. The next
++ * next data element is returned or NULL if there is no next element.
++ * See MagnetPayloadFirst() for example usage.
++ *
++ * @param[in] payload  Payload
++ *
++ * @return The next data element in the payload
++ */
++MAGNET_EXPORT
++    stMagnetData *  MagnetPayloadNext (stMagnetPayload *  payload);
++
++/**
++ * @brief Destroy the payload and all data elements in it
++ *
++ * This function frees all memory associated with the payload including
++ * all data elements inside it
++ *
++ * @param[in] payload  Payload
++ */
++MAGNET_EXPORT
++    void MagnetPayloadDestroy (stMagnetPayload **  payload);
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Data_API Magnet API for Magnet data structure
++ */
++
++/**
++ * @addtogroup Magnet_Data_API
++ * @{
++ */
++
++/**
++ * @brief Initializes new stMagnetData structure
++ *
++ * Initializes a new data structure. The new structure will be empty
++ * until MagnetDataSetContents() is used to set the data. The alternative
++ * function MagnetDataInitAndSet() allows creating and initializing a
++ * data structure in the same call
++ *
++ * @return Pointer to the created data structure
++ */
++MAGNET_EXPORT
++    stMagnetData *  MagnetDataInit ();
++
++/**
++ * @brief Initialize and set data
++ *
++ * A convenience function for doing MagnetDataInit() and MagnetDataSetContents()
++ * in one call
++ *
++ * @param[in] content       Data to be set to Magnet data
++ * @param[in] contentSize Size of content
++ *
++ * @return Pointer to the created data structure
++ */
++MAGNET_EXPORT
++    stMagnetData *  MagnetDataInitAndSet (unsigned char *  content, size_t contentSize);
++
++/**
++ * @brief Set the contents of the data object
++ *
++ * Set the data contents of the structure. Calling this function on a structure that
++ * already has data will cause the previous data to be freed and replaced with new data.
++ * The structure will take a copy of the data
++ *
++ * @param[in] data               Magnet data
++ * @param[in] content           Data to be initialized
++ * @param[in] contentSize     Size of data
++ *
++ * The contents can be destroyed by passing NULL as data and 0 as dataSize
++ *
++ */
++MAGNET_EXPORT
++    void MagnetDataSetContents (stMagnetData *  data, unsigned char *  content, size_t contentSize);
++
++/**
++ * @brief Get the contents of the data object
++ *
++ * Returns a pointer to the data member of the structure. The second argument will be set
++ * to the size of the data member.
++ *
++ * @param[in] data  Magnet data
++ *
++ * @return Returns a pointer to the content data member of the structure. The caller must not free this directly
++ */
++MAGNET_EXPORT
++    unsigned char *  MagnetDataGetContents (stMagnetData *  data);
++
++/**
++ * @brief Get the size of the data object
++ *
++ * Returns a size of data.
++ *
++ * @param[in] data  Magnet data
++ *
++ * @return Returns a size of data
++ */
++MAGNET_EXPORT
++    size_t MagnetDataGetSize (stMagnetData *  data);
++
++/**
++ * @brief Get the contents of the data object and contents size
++ *
++ * Returns a pointer to the contents
++ *
++ * @param[in]   data     Magnet data
++ * @param[out] contentSize  Size of data
++ *
++ * @return Returns a pointer to the data
++ */
++MAGNET_EXPORT
++    unsigned char *  MagnetDataGet (stMagnetData *  data, size_t *  contentSize);
++
++/**
++ * @brief Destroys the data structure and frees memory associated with it
++ *
++ * Destroys the stMagnetData structure and frees the data member if it's set
++ * to a non-NULL value
++ *
++ * @param[in]  data   Magnet data
++ */
++MAGNET_EXPORT
++    void MagnetDataDestroy (stMagnetData **  data);
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Callback_Initialize_API Magnet API for initializing callback structure
++ */
++
++/**
++ * @addtogroup Magnet_Callback_Initialize_API
++ * @{
++ */
++
++/**
++ * @brief Allocate and initialize a new core callback structure
++ *
++ * Initializes a new listener callback structure and sets it's members to NULL.
++ *
++ * @return The new listener callback structure
++ */
++MAGNET_EXPORT
++    stMagnetListener *  MagnetListenerInit ();
++
++/**
++ * @brief Set magnet core listening callback function to listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @param[in] func      Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnListeningCB (stMagnetListener *  listener, magnetOnListeningCB *  func);
++
++/**
++ * @brief Get magnet core listening callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++MAGNET_EXPORT
++    magnetOnListeningCB *  MagnetListenerGetOnListeningCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set magnet core stopeed callback function to listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @param[in] func      Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnStoppedCB (stMagnetListener *  listener, magnetOnStoppedCB *  func);
++
++/**
++ * @brief Get magnet core stopeed callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++MAGNET_EXPORT
++    magnetOnStoppedCB *  MagnetListenerGetOnStoppedCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set magnet on peers callback function to listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @param[in] func      Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnPeersCB (stMagnetListener *  listener, magnetOnPeersCB *  func);
++
++/**
++ * @brief Get magnet on peers callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++MAGNET_EXPORT
++    magnetOnPeersCB *  MagnetListenerGetOnPeersCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set magnet no peers callback function to listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @param[in] func      Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnNoPeersCB (stMagnetListener *  listener, magnetOnNoPeersCB *  func);
++
++/**
++ * @brief Get magnet no peers callback function from listener
++ *
++
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++MAGNET_EXPORT
++    magnetOnNoPeersCB *  MagnetListenerGetOnNoPeersCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set core start error callback function to listener
++ *
++ * @param[in] listener   Magnet listener created with MagnetListenerInit()
++ * @param[in] func       Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnServiceErrorCB (stMagnetListener *  listener,  magnetOnServiceErrorCB *  func);
++
++/**
++ * @brief Get core start error callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */MAGNET_EXPORT
++    magnetOnServiceErrorCB *  MagnetListenerGetOnServiceErrorCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set peer joined callback function to listener
++ *
++ * @param[in] listener      Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnJoinCB (stMagnetListener *  listener, magnetOnJoinCB *  func);
++
++/**
++ * @brief Get peer joined callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */MAGNET_EXPORT
++    magnetOnJoinCB *  MagnetListenerGetOnJoinCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set peer leaved callback function to listener
++ *
++ * @param[in] listener      Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnLeaveCB (stMagnetListener *  listener, magnetOnLeaveCB *  func);
++
++/**
++ * @brief Get peer left callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */MAGNET_EXPORT
++    magnetOnLeaveCB *  MagnetListenerGetOnLeaveCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set receive data callback function to listener
++ *
++ * @param[in] listener      Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnDataReceivedCB (stMagnetListener *  listener, magnetOnDataReceivedCB *  func);
++
++/**
++ * @brief Get receive data callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @return Returns a pointer of callback function
++ */
++ MAGNET_EXPORT
++    magnetOnDataReceivedCB *  MagnetListenerGetOnDataReceivedCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set request file share notification callback function to listener
++ *
++ * @param[in] listener      Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnFileNotifiedCB (stMagnetListener *  listener, magnetOnFileNotifiedCB *  func);
++
++/**
++ * @brief Get request file share notification callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++ MAGNET_EXPORT
++    magnetOnFileNotifiedCB *  MagnetListenerGetOnFileNotifiedCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set complete file received callback function to listener
++ *
++ * @param[in] listener      Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnFileReceivedCB (stMagnetListener *  listener, magnetOnFileReceivedCB *  func);
++
++/**
++ * @brief Get complete file received callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++ MAGNET_EXPORT
++    magnetOnFileReceivedCB *  MagnetListenerGetOnFileReceivedCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set file chunk receive callback function to listener
++ *
++ * @param[in] listener      Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnChunkReceivedCB (stMagnetListener *  listener, magnetOnChunkReceivedCB *  func);
++
++/**
++ * @brief Get file chunk receive callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++ MAGNET_EXPORT
++    magnetOnChunkReceivedCB *  MagnetListenerGetOnChunkReceivedCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set file transfer fail callback function to listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnFileFailedCB (stMagnetListener *  listener, magnetOnFileFailedCB *  func);
++
++/**
++ * @brief Get file transfer fail callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++ MAGNET_EXPORT
++    magnetOnFileFailedCB *  MagnetListenerGetOnFileFailedCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set sent file chunk callback function to listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnChunkSentCB (stMagnetListener *  listener, magnetOnChunkSentCB *  func);
++
++/**
++ * @brief Get sent file chunk callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++ MAGNET_EXPORT
++    magnetOnChunkSentCB *  MagnetListenerGetOnChunkSentCB (stMagnetListener *  listener);
++
++/**
++ * @brief Set complete file sent callback function to listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ * @param[in] func   Magnet callback function to set
++ */
++MAGNET_EXPORT
++    void MagnetListenerSetOnFileSentCB (stMagnetListener *  listener, magnetOnFileSentCB *  func);
++
++/**
++ * @brief Get complete file sent callback function from listener
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ * @return Returns a pointer of callback function
++ */
++ MAGNET_EXPORT
++    magnetOnFileSentCB *  MagnetListenerGetOnFileSentCB (stMagnetListener *  listener);
++
++/**
++ * @brief Deallocate a listener callback structure.
++ *
++ * It's important to note that when callbacks are associated with a magnet instance
++ * using MagnetSetListener () the instance will take ownership of this structure and
++ * takes care of freeing it during the destruction of it.
++ *
++ * @param[in] listener  Magnet listener created with MagnetListenerInit()
++ *
++ */
++MAGNET_EXPORT
++    void MagnetListenerDestroy (stMagnetListener **  listener);
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Transfer_Information_API Magnet API for Magnet transfer information structure
++ */
++
++/**
++ * @addtogroup Magnet_Transfer_Information_API
++ * @{
++ */
++
++/**
++ * @brief Initializes Magnet transfer information structure
++ *
++ * @return Pointer to the created transfer information data structure
++ */
++MAGNET_EXPORT
++    stMagnetTransferInfo *  MagnetTransferInfoInit ();
++
++/**
++ * @brief Set filename to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param fileName Filename to set
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetFilename (stMagnetTransferInfo *  info, const char *  fileName);
++
++/**
++ * @brief Get filename from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns filename
++ */
++MAGNET_EXPORT
++    const char *  MagnetTransferInfoGetFilename (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Set file hash to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param hash File hash to set
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetHash (stMagnetTransferInfo *  info, const char *  hash);
++
++/**
++ * @brief Get file hash from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns file hash
++ */
++MAGNET_EXPORT
++    const char *  MagnetTransferInfoGetHash (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Set transfer exchange ID to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param exchangeId Transfer exchange ID to set
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetExchangeId (stMagnetTransferInfo *  info, const char *  exchangeId);
++
++/**
++ * @brief Get Transfer exchange ID from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns transfer exchange ID
++ */
++MAGNET_EXPORT
++    const char *  MagnetTransferInfoGetExchangeId (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Set temporary file save path to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param tmpPath Temporary file save path to set
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetTmpPath (stMagnetTransferInfo *  info, const char *  tmpPath);
++
++/**
++ * @brief Get temporary file save path from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns temporary file save path
++ */
++MAGNET_EXPORT
++    const char *  MagnetTransferInfoGetTmpPath (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Set file size to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param fileSize File size to set
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetFileSize (stMagnetTransferInfo *  info, size_t fileSize);
++
++/**
++ * @brief Get file size from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns file size
++ */
++MAGNET_EXPORT
++    size_t MagnetTransferInfoGetFileSize (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Set file offset to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param offset File offset to set
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetOffset (stMagnetTransferInfo *  info, size_t offset);
++
++/**
++ * @brief Get file offset from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns file offset
++ */
++MAGNET_EXPORT
++    size_t MagnetTransferInfoGetOffset (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Set file chunksize to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param chunkSize File chunksize to set
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetChunkSize (stMagnetTransferInfo *  info, size_t chunkSize);
++
++/**
++ * @brief Get file chunksize from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns file chunksize
++ */
++MAGNET_EXPORT
++    size_t MagnetTransferInfoGetChunkSize (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Set file transfer fail reason to file transfer info structure
++ *
++ * @param info File transfer info
++ * @param reason file transfer fail reason. Refet to the MagnetErrorCode.h about file trasnfer
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoSetReason (stMagnetTransferInfo *  info, int reason);
++
++/**
++ * @brief Get file transfer fail reason from file transfer info structure
++ *
++ * @param info File transfer info
++ *
++ * @return Returns file transfer fail reason
++ */
++MAGNET_EXPORT
++    int MagnetTransferInfoGetReason (stMagnetTransferInfo *  info);
++
++/**
++ * @brief Memory free and delete file transfer structure
++ *
++ * @param p Pointer of file transfer info structure
++ */
++MAGNET_EXPORT
++    void MagnetTransferInfoDestroy (stMagnetTransferInfo **  p);
++
++/**
++ * @}
++ */
++
++/**
++ * @defgroup Magnet_Header_API Magnet API for Magnet header structure
++ */
++
++/**
++ * @addtogroup Magnet_Header_API
++ * @{
++ */
++
++/**
++ * @brief Allocate stMagnetHeader type memory
++ *
++ * @return Returns stMagnetHeader type memory
++ */
++MAGNET_EXPORT
++    stMagnetHeader *  MagnetHeaderInit ();
++
++/**
++ * @brief Duplicate header
++ *
++ * @return Returns Duplicate stMagnetHeader
++ */
++MAGNET_EXPORT
++    stMagnetHeader *  MagnetHeaderDup (stMagnetHeader *  header);
++
++/**
++ * @brief Set nodename to magnet header structure
++ *
++ * @param header Opaque structure for magnet header
++ * @param nodeName Node name
++ */
++MAGNET_EXPORT
++    void MagnetHeaderSetNodeName (stMagnetHeader *  header, const char *  nodeName);
++
++/**
++ * @brief Get nodename from magnet header structure
++ *
++ * @param header Opaque structure for magnet header
++ *
++ * @return Returns node name
++ */
++MAGNET_EXPORT
++    const char *  MagnetHeaderGetNodeName (stMagnetHeader *  header);
++
++/**
++ * @brief Set channel to magnet header structure
++ *
++ * @param header Opaque structure for magnet header
++ * @param channel channel name
++ */
++MAGNET_EXPORT
++    void MagnetHeaderSetChannel (stMagnetHeader *  header, const char *  channel);
++
++/**
++ * @brief Get channel from magnet header structure
++ *
++ * @param header Opaque structure for magnet header
++ *
++ * @return Returns channel name
++ */
++MAGNET_EXPORT
++    const char *  MagnetHeaderGetChannel (stMagnetHeader *  header);
++
++/**
++ * @brief Set message or file type to magnet header structure
++ *
++ * @param header Opaque structure for magnet header
++ * @param type Message or file type defined by user
++ */
++MAGNET_EXPORT
++    void MagnetHeaderSetType (stMagnetHeader *  header, const char *  type);
++
++/**
++ * @brief Get nodename from magnet header structure
++ *
++ * @param header Opaque structure for magnet header
++ *
++ * @return Returns type
++ */
++MAGNET_EXPORT
++    const char *  MagnetHeaderGetType (stMagnetHeader *  header);
++
++/**
++ * @brief Memory free and delete magnet header structure
++ *
++ * @param header Pointer of magnet header structure
++ */
++MAGNET_EXPORT
++    void MagnetHeaderDestroy (stMagnetHeader **  header);
++
++/**
++ * @}
++ */
++
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _MAGNET_API_H_ */
+diff --git a/magnet/native_include/MagnetErrorCode.h b/magnet/native_include/MagnetErrorCode.h
+new file mode 100644
+index 0000000..037c36e
+--- /dev/null
++++ b/magnet/native_include/MagnetErrorCode.h
+@@ -0,0 +1,105 @@
++#ifndef _MagnetErrorCode_H_
++#define _MagnetErrorCode_H_
++
++/**
++ * @defgroup Magnet_Core_Macros Magnet Error Codes about magnet start
++ */
++
++/**
++ * @addtogroup Magnet_Core_Macros
++ * @{
++ */
++
++/**
++ * @brief Default value for the magnet core created
++ */
++#define CORE_CREATE                             1000;
++
++/**
++ * @brief The system lacked the necessary resources to create another thread, or the system-imposed limit on the total number of threads in a process PTHREAD_THREADS_MAX would be exceeded
++ */
++#define CORE_CREATE_FAIL_EAGAIN		            1001;
++
++/**
++ * @brief The value specified by attribute is invalid
++ */
++#define CORE_CREATE_FAIL_EINVAL                 1002;
++
++/**
++ * @brief The caller does not have appropriate permission to set the required scheduling parameters or scheduling policy
++ */
++#define CORE_CREATE_FAIL_EPERM                  1003;
++
++/**
++ * @brief Unknown failure 
++ */
++#define CORE_CREATE_FAIL_UNKNOWN                1004;
++
++/**
++ * @} 
++ */
++
++/**
++ * @defgroup Magnet_File_Share_Macros Magnet Error Codes about file transfer
++ */
++
++/**
++ * @addtogroup Magnet_File_Share_Macros
++ * @{
++ */
++
++/**
++ * @brief Default value for the magnet file transfer 
++ */
++#define FILE_SHARE                              5000;
++
++/**
++ * @brief There is not peer information when file transfer is started 
++ */
++#define FILE_SHARE_ERROR_PEER_NOT_FOUND         5001;
++
++/**
++ * @brief Fail to allocate the memory to send file 
++ */
++#define FILE_SHARE_ERROR_MEMORY_ALLOC           5002;
++
++/**
++ * @brief Fail to create file that is sent 
++ */
++#define FILE_SHARE_ERROR_FILE_CREATE_FAIL       5003;
++
++/**
++ * @brief The file size is larger than UINT size
++ */
++#define FILE_SHARE_ERROR_INVALID_FILE_SIZE      5004;
++
++/**
++ * @brief Transfer message has an error 
++ */
++#define FILE_SHARE_ERROR_INVALID_TRANSFER_MSG   5005;
++
++/**
++ * @brief Time out is occured when file transfer is in progress 
++ */
++#define FILE_SHARE_ERROR_TRANSFER_TIME_OUT      5006;
++
++/**
++ * @brief Internal error is occrued when file transfer is preparing 
++ */
++#define FILE_SHARE_ERROR_TRANSFER_PREPARE       5007;
++
++/**
++ * @brief Receiver reject the file transfer 
++ */
++#define FILE_SHARE_ERROR_REJECT_FILE_TRANSFER   5011;
++
++/**
++ * @brief Receiver cancel the file transfer 
++ */
++#define FILE_SHARE_ERROR_CANCEL_FILE_TRANSFER   5012;
++
++/**
++ * @} 
++ */
++
++#endif
+diff --git a/magnet/native_include/MagnetListener.h b/magnet/native_include/MagnetListener.h
+new file mode 100644
+index 0000000..ccb07dd
+--- /dev/null
++++ b/magnet/native_include/MagnetListener.h
+@@ -0,0 +1,76 @@
++#ifndef _MagnetListener_H_
++#define _MagnetListener_H_
++#include <string>
++#include <list>
++
++#include "Magnet.h"
++
++typedef struct _stMagnetHandle stMagnetHandle;
++
++namespace MagnetCallbacks
++{
++    using std::string;
++    using std::list;
++
++    class MagnetCoreCallback
++    {
++    private:
++        stMagnetHandle *mHandle;
++
++    public:
++        virtual void onCoreListeningCB(const string &localName);
++
++        virtual void onCoreStoppedCB(void);
++
++        virtual void onMagnetPeersCB(void);
++
++        virtual void onMagnetNoPeersCB(void);
++
++        virtual void onActiveInterfaceCB(const string &name);
++
++		virtual void onNotifyServiceErrorCB(int reason);
++
++        // Set the listener on the interface so that we can
++        // proxy the calls to the C functions
++        void setMagnetHandle (stMagnetHandle *handle)
++        {
++            mHandle = handle;
++        }
++    };
++
++    class MagnetChannelCallback
++    {
++    private:
++        stMagnetHandle *mHandle;
++
++    public:
++
++        virtual void onJoinedEventCB(const string &fromNode, const string &fromChannel);
++
++        virtual void onLeaveEventCB(const string &fromNode, const string &fromChannel, const int reason);
++
++        virtual void onDataReceivedCB(const string &fromNode, const string &fromChannel, const string &type, list<unsigned char*> *payload, int*sizes);
++
++        virtual void onFileNotifiedCB(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash, const string &exchangeId, const string &type, long fileSize, const string &msg1);
++
++        virtual void onChunkReceivedCB(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash, const string &exchangeId,
++            const string &type, long fileSize, long offset);
++
++        virtual void onFileReceivedCB(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash,
++            const string &exchangeId, const string &type, long fileSize, const string &tmpPath);
++
++        virtual void onFileFailedCB(const string &fromNode, const string &fromChannel, const string &originalName, const string &hash,
++            const string &exchangeId, int reason);
++
++        virtual void onChunkSentCB(const string &destination, const string &channel, const string &fileName, const string &hash, const string &exchangeId,
++            const string &type, long fileSize, long offset, long chunkSize);
++
++        virtual void onFileSentCB(const string &destination, const string &channel, const string &fileName, const string &hash, const string &exchangeId, const string &type, long fileSize);
++
++        void setMagnetHandle (stMagnetHandle *handle)
++        {
++            mHandle = handle;
++        }
++    };
++}
++#endif
+\ No newline at end of file
+diff --git a/net/tools/flip_server/sm_connection.cc b/net/tools/flip_server/sm_connection.cc
+index f47b502..71e81a0 100644
+--- a/net/tools/flip_server/sm_connection.cc
++++ b/net/tools/flip_server/sm_connection.cc
+@@ -7,6 +7,7 @@
+ #include <errno.h>
+ #include <netinet/tcp.h>
+ #include <sys/socket.h>
++#include <unistd.h>
+ 
+ #include <list>
+ #include <string>
+diff --git a/net/tools/quic/quic_client.cc b/net/tools/quic/quic_client.cc
+index b57e761..05833b2 100644
+--- a/net/tools/quic/quic_client.cc
++++ b/net/tools/quic/quic_client.cc
+@@ -5,6 +5,7 @@
+ #include "net/tools/quic/quic_client.h"
+ 
+ #include <errno.h>
++#include <unistd.h>
+ #include <netinet/in.h>
+ #include <string.h>
+ #include <sys/epoll.h>
+diff --git a/webkit/plugins/npapi/plugin_utils.cc b/webkit/plugins/npapi/plugin_utils.cc
+index df6efa6..7fd0fc4 100644
+--- a/webkit/plugins/npapi/plugin_utils.cc
++++ b/webkit/plugins/npapi/plugin_utils.cc
+@@ -45,7 +45,8 @@ void CreateVersionFromString(const base::string16& version_string,
+ }
+ 
+ bool NPAPIPluginsSupported() {
+-#if defined(OS_WIN) || defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(USE_AURA))
++//#if defined(OS_WIN) || defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(USE_AURA))
++#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
+   return true;
+ #else
+   return false;
+diff --git a/webkit/plugins/npapi/webplugin_delegate_impl_aura.cc b/webkit/plugins/npapi/webplugin_delegate_impl_aura.cc
+index ba91bf9..958e82b 100644
+--- a/webkit/plugins/npapi/webplugin_delegate_impl_aura.cc
++++ b/webkit/plugins/npapi/webplugin_delegate_impl_aura.cc
+@@ -12,7 +12,9 @@ using WebKit::WebInputEvent;
+ namespace webkit {
+ namespace npapi {
+ 
+-WebPluginDelegateImpl::WebPluginDelegateImpl(PluginInstance* instance) {
++WebPluginDelegateImpl::WebPluginDelegateImpl(PluginInstance* instance) :
++    instance_(instance)
++{
+ }
+ 
+ WebPluginDelegateImpl::~WebPluginDelegateImpl() {
