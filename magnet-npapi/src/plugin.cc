@@ -306,20 +306,8 @@ MagnetPlugin::~MagnetPlugin()
 }
 
 
-NPBool MagnetPlugin::init(NPWindow* pNPWindow)
+NPBool MagnetPlugin::init(NPWindow*)
 {
-    if(pNPWindow == NULL)
-        return false;
-
-#ifdef _WINDOWS
-    d->hWnd = (HWND)pNPWindow->window;
-    if(d->hWnd == NULL)
-        return false;
-#endif
-
-    d->Window = pNPWindow;
-    d->bInitialized = true;
-
     bool success = true;
 
     g_globalData.listener = MagnetListenerInit();
@@ -375,14 +363,13 @@ NPBool MagnetPlugin::init(NPWindow* pNPWindow)
         LOG_PRINT_DEBUG(MAGNET_LOG_DEBUG, "magnet-npapi", "failed to start magnet");
     }
 
-    d->bInitialized = success;
-
     return true;
 }
 
 NPBool MagnetPlugin::isInitialized()
 {
-     return d->bInitialized;
+    return 1;
+    //return d->bInitialized;
 }
 
 ScriptablePluginObject * MagnetPlugin::GetScriptableObject()

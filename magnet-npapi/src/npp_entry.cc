@@ -43,6 +43,8 @@ bool _getEnvDebugFlag()
 
 #if !defined(NDEBUG) || defined(_DEBUG)
 
+    const int g_WAIT_FOR_SIGCONT_TIMEOUT = 60;
+
     volatile int caught_signal = 0;
 
     void sigcont_handler(int sig)
@@ -53,7 +55,7 @@ bool _getEnvDebugFlag()
     void pause_jam()
     {
         caught_signal = 0;
-        int s = 30;
+        int s = g_WAIT_FOR_SIGCONT_TIMEOUT;
 
         while(s-- > 0 && caught_signal == 0)
             sleep(1);
@@ -63,9 +65,7 @@ bool _getEnvDebugFlag()
     {
     public:
         SigHandleInit() {
-
-            if ( _getEnvDebugFlag() )
-                signal(SIGCONT, sigcont_handler);
+            signal(SIGCONT, sigcont_handler);
         }
     };
 
@@ -111,7 +111,9 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance,
     if ( ! g_PAUSED_ONCE )
     {
         g_PAUSED_ONCE = true;
-        pause_jam();
+
+        if ( _getEnvDebugFlag() )
+            pause_jam();
     }
 
     if(instance == NULL)
@@ -128,6 +130,16 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance,
     MagnetPlugin * pPlugin = new MagnetPlugin(instance);
     if(pPlugin == NULL)
         return NPERR_OUT_OF_MEMORY_ERROR;
+
+    // window just created
+    if(!pPlugin->isInitialized()) 
+    { 
+        if(!pPlugin->init(nullptr)) {
+            delete pPlugin;
+            pPlugin = NULL;
+            return NPERR_MODULE_LOAD_FAILED_ERROR;
+        }
+    }
 
     instance->pdata = (void *)pPlugin;
 
@@ -154,15 +166,6 @@ NPError NPP_SetWindow(NPP instance, NPWindow* window) {
   MagnetPlugin * pPlugin = (MagnetPlugin *)instance->pdata;
   if(pPlugin == NULL) 
     return NPERR_GENERIC_ERROR;
-
-  // window just created
-  if(!pPlugin->isInitialized()) { 
-    if(!pPlugin->init(window)) {
-      delete pPlugin;
-      pPlugin = NULL;
-      return NPERR_MODULE_LOAD_FAILED_ERROR;
-    }
-  }
 
   return NPERR_NO_ERROR;
 }
