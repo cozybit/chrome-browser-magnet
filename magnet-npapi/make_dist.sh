@@ -13,7 +13,7 @@ cp $d/src/testclient $build/tmp
 
 cp -a $d/../magnet-extension $build/tmp
 
-tar -cvzf npapi-magnet.tgz \
+tar -cvzf $d/npapi-magnet.tgz \
     $build/tmp/test.html \
     $build/tmp/testclient \
 	$build/lib/libzmq.la \
