@@ -2,25 +2,61 @@
 
     var messages = document.getElementById('messages');
 
-    chrome.magnet.initialize("Magnet", function(result, msg) {
+    function addToLog(str) {
+        console.log(str);
+        messages.innerText = messages.innerText + ">>> " + str + "\n";
+    };
+
+    chrome.magnet.initialize(function(result, msg) {
         if ( result ) {
-            messages.innerText = "Success initializing Magnet\n";
+            addToLog("Success initializing");
         } else {
-            messages.innerText = "Failure initializing Magnet\n";
+            addToLog("Failure initializing");
+        }
+    });
+
+    chrome.magnet.join("meshmedia", function(result, msg) { 
+        if ( result ) {
+            addToLog("Channel join succeeded")
+        }
+        else {
+            addToLog("Channel join failed")
         }
     });
 
     chrome.magnet.onListening.addListener(function(){
-    	messages.innerText += "Listening!\n";
+
+    	addToLog("Got listening notification");
+
     });
 
-    chrome.magnet.onReceiveData.addListener(function(data) {
-    	messages.innerText += "Received some data: " + data + "\n";
+    chrome.magnet.onReceiveData.addListener(function(node, channel, type, data) {
+
+    	addToLog(
+            "Received message from node: '" + node +
+            "', channel: '" + channel +
+            "', type: '" + type + "', " +
+            "', data: '" + data);
+
     });
 
-    chrome.magnet.onJoin.addListener(function(){
-    	messages.innerText += "Someone joined!  Sending them a greeting...\n";
-    	chrome.magnet.sendData("Hello from Chrome!", function(){});
+    chrome.magnet.onLeave.addListener(function(node, channel) {
+
+        addToLog(
+            "Node left, name: '" + node +
+            "', channel: '" + channel
+            );
+
+    });
+
+    chrome.magnet.onJoin.addListener(function(node, channel){
+
+        if ( channel != "meshmedia" )
+            return;
+
+    	addToLog("Node '" + node + "'' joined. Sending them a greeting...");
+    	chrome.magnet.sendData(node, channel,  "text/plain", "Hello from Chrome!", function(){});
+
     });
 
 })();

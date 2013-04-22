@@ -1,26 +1,146 @@
 diff --git a/chrome/browser/extensions/api/magnet/magnet_api.cc b/chrome/browser/extensions/api/magnet/magnet_api.cc
 new file mode 100644
-index 0000000..90ec7bf
+index 0000000..1623d53
 --- /dev/null
 +++ b/chrome/browser/extensions/api/magnet/magnet_api.cc
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,491 @@
 +// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
++#include "base/bind.h"
 +#include "base/lazy_instance.h"
 +
-+#include "chrome/browser/extensions/api/magnet/magnet_api.h"
 +#include "chrome/common/extensions/api/magnet.h"
 +
++#include "chrome/browser/extensions/api/magnet/magnet_api.h"
++#include "chrome/browser/extensions/extension_service.h"
++#include "chrome/browser/extensions/extension_system.h"
 +#include "chrome/browser/extensions/event_names.h"
 +
-+#include <iostream>
++#include "content/public/browser/browser_thread.h"
++
 +#include <set>
++#include <string>
++#include <cstring>
++#include <iostream>
++
++#include <stdio.h>
++#include <unistd.h>
++#include <string.h>
++#include <stdlib.h>
++#include <signal.h>
++#include <sys/types.h>
 +
 +#include "Magnet.h"
 +
-+static std::set<Profile*> g_profiles;
++#if !defined(NDEBUG) || defined(_DEBUG)
++
++bool _getEnvDebugFlag()
++{
++    char* e = getenv("MAGNET_NPAPI_DEBUG");
++    return e != 0 && strlen(e) > 0 && strcmp(e, "0") != 0;
++}
++
++const int g_WAIT_FOR_SIGCONT_TIMEOUT = 60*10;
++
++volatile int caught_signal = 0;
++
++static void _sigcont_handler(int sig)
++{
++    caught_signal = sig; 
++}
++
++static void _write_pid()
++{
++    FILE *fp = fopen("/tmp/chrome-magnet.pid", "w");
++    if (!fp) { return; }
++
++    pid_t pid = getpid();
++    fprintf(fp, "%d\n", pid);
++
++    fclose(fp);
++}
++
++#if 0
++static void _pause_jam()
++{
++    caught_signal = 0;
++    int s = g_WAIT_FOR_SIGCONT_TIMEOUT;
++
++    while(s-- > 0 && caught_signal == 0)
++        sleep(1);
++}
++#endif
++
++class SigHandleInit
++{
++public:
++    SigHandleInit() {
++        _write_pid();
++        signal(SIGUSR1, _sigcont_handler);
++    }
++};
++
++static SigHandleInit _sigHandleInit;
++static bool g_PAUSED_ONCE = false;
++
++#endif
++
++static void _debugger_attach_point()
++{
++#if !defined(NDEBUG) || defined(_DEBUG)
++    if ( ! g_PAUSED_ONCE )
++    {
++        g_PAUSED_ONCE = true;
++
++        if ( _getEnvDebugFlag() )
++        {
++            //_pause_jam();
++            pause();
++        }
++    }
++#endif
++}
++
++struct MagnetEventListener
++{
++    Profile* profile;
++    std::string extension_id;
++
++    MagnetEventListener(Profile* p, const std::string& s)
++        : profile(p)
++        , extension_id(s)
++    {
++    }
++
++    MagnetEventListener(const MagnetEventListener& o)
++        : profile(o.profile)
++        , extension_id(o.extension_id)
++    {
++    }
++};
++
++class CompareOp
++{
++public:
++    bool operator()(const MagnetEventListener& l, const MagnetEventListener& r)
++    {
++        if ( ((size_t)l.profile - (size_t)r.profile) < 0 )
++            return true;
++
++        if ( ::strcmp(l.extension_id.c_str(), r.extension_id.c_str()) < 0 )
++            return true;
++
++        return false;
++    }
++};
++
++typedef std::set<MagnetEventListener, CompareOp> MagnetEventListenerSet;
++
++static MagnetEventListenerSet g_listeningListeners;
++static MagnetEventListenerSet g_joinListeners;
++static MagnetEventListenerSet g_receiveDataListeners;
 +
 +namespace extensions {
 +
@@ -40,17 +160,63 @@ index 0000000..90ec7bf
 +        ->RegisterObserver(this, extensions::event_names::kOnMagnetReceiveData);
 +}
 +
-+MagnetAPI::~MagnetAPI() {
++MagnetAPI::~MagnetAPI()
++{
 +}
 +
-+void MagnetAPI::Shutdown() {
++void MagnetAPI::Shutdown()
++{
 +    ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
-+    g_profiles.erase(profile_);
 +}
 +
-+void MagnetAPI::OnListenerAdded(const EventListenerInfo& details) {
-+  ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
-+  g_profiles.insert(profile_);
++void MagnetAPI::OnListenerAdded(const EventListenerInfo& details)
++{
++    MagnetEventListener magEventListner(profile_, details.extension_id);
++
++    if (details.event_name == extensions::event_names::kOnMagnetListening)
++    {
++        g_listeningListeners.insert(magEventListner);
++    }
++    else if (details.event_name == extensions::event_names::kOnMagnetJoin)
++    {
++        g_joinListeners.insert(magEventListner);
++    }
++    else if (details.event_name == extensions::event_names::kOnMagnetReceiveData)
++    {
++        g_receiveDataListeners.insert(magEventListner);
++    }
++}
++
++void MagnetAPI::OnListenerRemoved(const EventListenerInfo& details)
++{
++    std::vector<MagnetEventListener> ls;
++    MagnetEventListenerSet* pset = 0;
++
++    if (details.event_name == extensions::event_names::kOnMagnetListening)
++    {
++        pset = &g_listeningListeners;
++    }
++    else if (details.event_name == extensions::event_names::kOnMagnetJoin)
++    {
++        pset = &g_joinListeners;
++    }
++    else if (details.event_name == extensions::event_names::kOnMagnetReceiveData)
++    {
++        pset = &g_receiveDataListeners;
++    }
++
++    MagnetEventListenerSet::iterator it = pset->begin();
++    for (/**/; it != pset->end(); it++)
++    {
++        if ( (*it).profile == profile_ )
++            ls.push_back(*it);
++    }
++
++    std::vector<MagnetEventListener>::iterator it2 = ls.begin();
++    for (/**/; it2 != ls.end(); it2++)
++    {
++        pset->erase(*it2);
++    }
 +}
 +
 +static base::LazyInstance<ProfileKeyedAPIFactory<MagnetAPI> >
@@ -61,68 +227,216 @@ index 0000000..90ec7bf
 +  return &g_factory.Get();
 +}
 +
-+#if 0
-+// static
-+static MagnetAPI* MagnetAPI_Get(Profile* profile) {
-+  return MagnetAPI::GetFactoryInstance()->GetForProfile(profile);
-+}
-+#endif
-+
 +} // namespace extensions
 +
 +class GlobalMagnetData
 +{
 +public:
-+    stMagnetHeader* header;
++    std::string local_node_name;
 +    stMagnetListener* listener;
++    bool initialized;
++    bool listening;
 +
 +    GlobalMagnetData()
-+        : header(0)
-+        , listener(0)
++        : listener(0)
++        , initialized(false)
++        , listening(false)
 +    {
 +    }
 +
 +    ~GlobalMagnetData()
 +    {
-+        MagnetHeaderDestroy(&header);
-+        MagnetListenerDestroy(&listener);
++        if ( listener != 0 )
++        {
++            MagnetListenerDestroy(&listener);
++        }
 +    }
 +};
 +
++
 +static GlobalMagnetData g_globalData;
++
++
++static void SendEventHelper(const std::string& event_name, scoped_ptr<ListValue> event_args)
++{
++    using namespace extensions;
++
++    MagnetEventListenerSet::iterator it = g_listeningListeners.begin();
++
++    for (/**/; it != g_listeningListeners.end(); it++)
++    {
++        Profile* profile = (*it).profile;
++        std::string extension_id = (*it).extension_id;
++
++        scoped_ptr<Event> event(new Event(event_name, event_args.Pass()));
++
++        event->restrict_to_profile = profile;
++        event->user_gesture = EventRouter::USER_GESTURE_NOT_ENABLED;
++
++        ExtensionSystem::Get(profile)
++            ->event_router()
++            ->DispatchEventToExtension(extension_id, event.Pass());
++    }
++}
++
++
++static void OnListenCallback_BrowserTask (std::string local_name) 
++{
++    using namespace extensions;
++
++    scoped_ptr<ListValue> event_args(api::magnet::OnListening::Create(local_name));
++    SendEventHelper(event_names::kOnMagnetListening, event_args.Pass());
++}
++
++
++static void OnListenCallback (const char* local_name_in) 
++{
++    std::string local_name(local_name_in);
++
++    g_globalData.local_node_name = local_name;
++    g_globalData.listening = true;
++
++    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
++        base::Bind(&OnListenCallback_BrowserTask, local_name));
++}
++
++
++static void OnLeaveCallback_BrowserTask(std::string fromNode, std::string fromChannel)
++{
++    using namespace extensions;
++
++    scoped_ptr<ListValue> event_args(api::magnet::OnLeave::Create(fromNode, fromChannel));
++    SendEventHelper(event_names::kOnMagnetLeave, event_args.Pass());
++}
++
++
++static void OnLeaveCallback(stMagnetHeader* leaving_header)
++{
++    std::string fromNode (MagnetHeaderGetNodeName(leaving_header));
++    std::string fromChannel (MagnetHeaderGetChannel(leaving_header));
++
++    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
++        base::Bind(&OnLeaveCallback_BrowserTask, fromNode, fromChannel));
++}
++
++
++static void OnJoinCallback_BrowserTask(std::string fromNode, std::string fromChannel)
++{
++    using namespace extensions;
++
++    scoped_ptr<ListValue> event_args(api::magnet::OnJoin::Create(fromNode, fromChannel));
++    SendEventHelper(event_names::kOnMagnetJoin, event_args.Pass());
++}
++
++    
++static void OnJoinCallback (stMagnetHeader* header) 
++{
++    std::string fromNode (MagnetHeaderGetNodeName(header));
++    std::string fromChannel (MagnetHeaderGetChannel(header));
++
++    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
++        base::Bind(&OnJoinCallback_BrowserTask, fromNode, fromChannel));
++}
++
++
++static void OnReceiveDataCallback_BrowserTask(std::string fromNode,
++                                              std::string fromChannel,
++                                              std::string type,
++                                              std::string data)
++{
++    using namespace extensions;
++
++    MagnetEventListenerSet::iterator it = g_listeningListeners.begin();
++    for (/**/; it != g_listeningListeners.end(); it++)
++    {
++        Profile* profile = (*it).profile;
++        std::string extension_id = (*it).extension_id;
++
++        scoped_ptr<ListValue> event_args(api::magnet::OnReceiveData::Create(fromNode, fromChannel, type, data));
++
++        std::string event_name(event_names::kOnMagnetReceiveData);
++        scoped_ptr<Event> event(new Event(event_name, event_args.Pass()));
++
++        event->restrict_to_profile = profile;
++        event->user_gesture = EventRouter::USER_GESTURE_NOT_ENABLED;
++
++        ExtensionSystem::Get(profile)
++            ->event_router()
++            ->DispatchEventToExtension(extension_id, event.Pass());
++    }
++}
++
++
++static void OnReceiveDataCallback(stMagnetHeader *header, stMagnetPayload *payload)
++{
++    std::string fromNode (MagnetHeaderGetNodeName(header));
++    std::string fromChannel (MagnetHeaderGetChannel(header));
++    std::string type (MagnetHeaderGetType(header));
++
++    std::string data ((char *) MagnetDataGetContents(MagnetPayloadFirst(payload)));
++
++    BrowserThread::PostTask(
++        BrowserThread::UI,
++        FROM_HERE,
++        base::Bind(
++            &OnReceiveDataCallback_BrowserTask,
++            fromNode,
++            fromChannel,
++            type,
++            data
++        )
++    );
++}
++
++
++static void OnStoppedCallback()
++{
++    g_globalData.listening = false;
++}
++
 +
 +namespace Initialize = extensions::api::magnet::Initialize;
 +namespace SendData = extensions::api::magnet::SendData;
++namespace Join = extensions::api::magnet::Join;
 +
 +namespace extensions {
 +
 +bool MagnetInitializeFunction::RunImpl() {
 +
-+    scoped_ptr<Initialize::Params> params(Initialize::Params::Create(*args_));
-+    EXTENSION_FUNCTION_VALIDATE(params);
-+
-+    std::cerr << "MagnetInitializeFunction: " << params->channel << std::endl;
++    _debugger_attach_point();
 +
 +    bool success = true;
 +    std::string error = "";
 +
-+    if ( ! MagnetInit("/tmp") )
++    if ( ! g_globalData.initialized )
 +    {
-+        success = false;
++        g_globalData.listener = MagnetListenerInit();
 +
-+        error = "MagnetInit() failed";
-+        std::cerr << error << std::endl;
-+    }
++        MagnetListenerSetOnLeaveCB(g_globalData.listener, OnLeaveCallback);
++        MagnetListenerSetOnJoinCB(g_globalData.listener, OnJoinCallback);
++        MagnetListenerSetOnListeningCB(g_globalData.listener, OnListenCallback);
++        MagnetListenerSetOnDataReceivedCB(g_globalData.listener, OnReceiveDataCallback);
++        MagnetListenerSetOnStoppedCB(g_globalData.listener, OnStoppedCallback);
 +
-+    MagnetSetListener(g_globalData.listener);
-+    MagnetJoinChannel(params->channel.c_str());
++        if ( ! MagnetInit("/tmp") )
++        {
++            success = false;
 +
-+    if ( success && ! MagnetStart() )
-+    {
-+        success = false;
++            error = "MagnetInit() failed";
++            std::cerr << error << std::endl;
++        }
 +
-+        error = "MagnetStart() failed";
-+        std::cerr << error << std::endl;
++        MagnetSetListener(g_globalData.listener);
++
++        if ( success && ! MagnetStart() )
++        {
++            success = false;
++
++            error = "MagnetStart() failed";
++            std::cerr << error << std::endl;
++        }
++
++        g_globalData.initialized = true;
 +    }
 +
 +    results_ = Initialize::Results::Create(success, error);
@@ -130,13 +444,50 @@ index 0000000..90ec7bf
 +    return true;
 +}
 +
++bool MagnetJoinFunction::RunImpl() {
++
++    scoped_ptr<Join::Params> params(Join::Params::Create(*args_));
++    EXTENSION_FUNCTION_VALIDATE(params);
++
++    bool success = true;
++    std::string message = "";
++
++    success = 0 != MagnetJoinChannel(params->channel.c_str());
++
++    if ( success )
++        message = "Joining the channel succeeded!";
++    else
++        message = "Joining the channel failed!";
++
++    results_ = Join::Results::Create(success, message);
++
++    return true;
++}
++
++
 +bool MagnetSendDataFunction::RunImpl() {
 +
 +    scoped_ptr<SendData::Params> params(SendData::Params::Create(*args_));
 +    EXTENSION_FUNCTION_VALIDATE(params);
 +
++    // static void sendData(DOMString toNode, DOMString toChannel, DOMString data, OnMagnetCallback callback);
++
 +    bool success = true;
 +    std::string error = "";
++
++    stMagnetHeader* header = ::MagnetHeaderInit();
++
++    ::MagnetHeaderSetNodeName(header, params->to_node.c_str());
++    ::MagnetHeaderSetChannel(header, params->to_channel.c_str());
++    ::MagnetHeaderSetType(header, params->data_type.c_str());
++
++    stMagnetPayload* payload = ::MagnetPayloadInit();
++
++    const char* HELLO_MESSAGE = params->data.c_str();
++    ::MagnetPayloadAppendBlob (payload, (unsigned char *) HELLO_MESSAGE, strlen (HELLO_MESSAGE) + 1);
++
++    ::MagnetHeaderSetType (header, "text/plain");
++    ::MagnetSendData (header, &payload);
 +
 +    results_ = SendData::Results::Create(success, error);
 +
@@ -146,10 +497,10 @@ index 0000000..90ec7bf
 +}  // namespace extensions
 diff --git a/chrome/browser/extensions/api/magnet/magnet_api.h b/chrome/browser/extensions/api/magnet/magnet_api.h
 new file mode 100644
-index 0000000..7a8b8bb
+index 0000000..5819ac2
 --- /dev/null
 +++ b/chrome/browser/extensions/api/magnet/magnet_api.h
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,79 @@
 +
 +#ifndef CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
 +#define CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
@@ -178,6 +529,7 @@ index 0000000..7a8b8bb
 +
 +  // EventRouter::Observer implementation.
 +  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
++  virtual void OnListenerRemoved(const EventListenerInfo& details) OVERRIDE;
 +
 + private:
 +  friend class ProfileKeyedAPIFactory<MagnetAPI>;
@@ -203,6 +555,17 @@ index 0000000..7a8b8bb
 +  virtual bool RunImpl() OVERRIDE;
 +};
 +
++class MagnetJoinFunction : public SyncExtensionFunction {
++ public:
++  DECLARE_EXTENSION_FUNCTION("magnet.join", MAGNET_JOIN)
++
++ protected:
++  virtual ~MagnetJoinFunction() {}
++
++  // ExtensionFunction:
++  virtual bool RunImpl() OVERRIDE;
++};
++
 +class MagnetSendDataFunction : public SyncExtensionFunction {
 + public:
 +  DECLARE_EXTENSION_FUNCTION("magnet.sendData", MAGNET_SENDDATA)
@@ -218,49 +581,72 @@ index 0000000..7a8b8bb
 +
 +#endif  // CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
 diff --git a/chrome/browser/extensions/event_names.cc b/chrome/browser/extensions/event_names.cc
-index 132ad65b..15885f1 100644
+index 132ad65b..905971a 100644
 --- a/chrome/browser/extensions/event_names.cc
 +++ b/chrome/browser/extensions/event_names.cc
-@@ -98,6 +98,10 @@ const char kOnNotificationButtonClicked[] = "notifications.onButtonClicked";
+@@ -98,6 +98,11 @@ const char kOnNotificationButtonClicked[] = "notifications.onButtonClicked";
  const char kOnNetworksChanged[] = "networkingPrivate.onNetworksChanged";
  const char kOnNetworkListChanged[] = "networkingPrivate.onNetworkListChanged";
  
 +const char kOnMagnetListening[] = "magnet.onListening";
 +const char kOnMagnetJoin[] = "magnet.onJoin";
++const char kOnMagnetLeave[] = "magnet.onLeave";
 +const char kOnMagnetReceiveData[] = "magnet.onReceiveData";
 +
  }  // namespace event_names
  
  }  // namespace extensions
 diff --git a/chrome/browser/extensions/event_names.h b/chrome/browser/extensions/event_names.h
-index 9667ea0..fa0a2e8 100644
+index 9667ea0..b5a0865 100644
 --- a/chrome/browser/extensions/event_names.h
 +++ b/chrome/browser/extensions/event_names.h
-@@ -112,6 +112,11 @@ extern const char kOnNotificationButtonClicked[];
+@@ -112,6 +112,12 @@ extern const char kOnNotificationButtonClicked[];
  extern const char kOnNetworksChanged[];
  extern const char kOnNetworkListChanged[];
  
 +// Magnet
 +extern const char kOnMagnetListening[];
 +extern const char kOnMagnetJoin[];
++extern const char kOnMagnetLeave[];
 +extern const char kOnMagnetReceiveData[];
 +
  }  // namespace event_names
  
  }  // namespace extensions
 diff --git a/chrome/browser/extensions/extension_function_histogram_value.h b/chrome/browser/extensions/extension_function_histogram_value.h
-index a6e6023..780e573 100644
+index a6e6023..2d8dfc0 100644
 --- a/chrome/browser/extensions/extension_function_histogram_value.h
 +++ b/chrome/browser/extensions/extension_function_histogram_value.h
-@@ -500,6 +500,8 @@ enum HistogramValue {
+@@ -500,6 +500,9 @@ enum HistogramValue {
    WALLPAPERPRIVATE_RESETWALLPAPER,
    DEVELOPERPRIVATE_PERMISSIONS,
    WEBSTOREPRIVATE_ENABLEAPPLAUNCHER,
 +  MAGNET_INITIALIZE,
 +  MAGNET_SENDDATA,
++  MAGNET_JOIN,
    ENUM_BOUNDARY // Last entry: Add new entries above.
  };
  
+diff --git a/chrome/browser/profiles/profile_dependency_manager.cc b/chrome/browser/profiles/profile_dependency_manager.cc
+index 9226bf2..ec0fdbd 100644
+--- a/chrome/browser/profiles/profile_dependency_manager.cc
++++ b/chrome/browser/profiles/profile_dependency_manager.cc
+@@ -33,6 +33,7 @@
+ #include "chrome/browser/extensions/api/identity/identity_api.h"
+ #include "chrome/browser/extensions/api/idle/idle_manager_factory.h"
+ #include "chrome/browser/extensions/api/input/input.h"
++#include "chrome/browser/extensions/api/magnet/magnet_api.h"
+ #include "chrome/browser/extensions/api/managed_mode_private/managed_mode_private_api.h"
+ #include "chrome/browser/extensions/api/management/management_api.h"
+ #include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
+@@ -297,6 +298,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
+   extensions::InputImeAPI::GetFactoryInstance();
+   extensions::InputMethodAPI::GetFactoryInstance();
+ #endif
++  extensions::MagnetAPI::GetFactoryInstance();
+   extensions::ManagedModeAPI::GetFactoryInstance();
+   extensions::ManagementAPI::GetFactoryInstance();
+   extensions::MediaGalleriesPrivateAPI::GetFactoryInstance();
 diff --git a/chrome/chrome_browser.gypi b/chrome/chrome_browser.gypi
 index c089aaa..ac44e47 100644
 --- a/chrome/chrome_browser.gypi
@@ -327,10 +713,10 @@ index a89e95c..ee7e326 100644
            'media_galleries.idl',
 diff --git a/chrome/common/extensions/api/magnet.idl b/chrome/common/extensions/api/magnet.idl
 new file mode 100644
-index 0000000..02b02b8
+index 0000000..64be503
 --- /dev/null
 +++ b/chrome/common/extensions/api/magnet.idl
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,33 @@
 +// Magnet API
 +
 +// An API for managing magnet data over a mesh
@@ -339,19 +725,29 @@ index 0000000..02b02b8
 +  callback OnMagnetCallback = void (boolean result, DOMString error);
 +
 +  interface Functions {
++
 +    // Initialize the Magnet API
-+    static void initialize(DOMString channel, OnMagnetCallback callback);
++    static void initialize(OnMagnetCallback callback);
++
++    // Join a Magnet channel
++    static void join(DOMString channel, OnMagnetCallback callback);   
++
 +    // Sends data to channel
-+    static void sendData(DOMString data, OnMagnetCallback callback);
++    static void sendData(DOMString toNode, DOMString toChannel, DOMString dataType, DOMString data, OnMagnetCallback callback);
 +  };
 +
 +  interface Events {
 +    // Fired when a listening event happens
 +    static void onListening(DOMString localName);
++    
 +    // Fired when a join event happens
-+    static void onJoin();
++    static void onJoin(DOMString fromNode, DOMString fromChannel);
++
++    // Fired when a leave event happens
++    static void onLeave(DOMString fromNode, DOMString fromChannel);
++
 +    // Fired when a join event happens
-+    static void onReceiveData(DOMString data);
++    static void onReceiveData(DOMString fromNode, DOMString fromChannel, DOMString dataType, DOMString data);
 +  };
 +};
 diff --git a/chrome/common/extensions/permissions/api_permission.h b/chrome/common/extensions/permissions/api_permission.h
@@ -4098,20 +4494,6 @@ index b57e761..05833b2 100644
  #include <netinet/in.h>
  #include <string.h>
  #include <sys/epoll.h>
-diff --git a/webkit/plugins/npapi/plugin_utils.cc b/webkit/plugins/npapi/plugin_utils.cc
-index df6efa6..7fd0fc4 100644
---- a/webkit/plugins/npapi/plugin_utils.cc
-+++ b/webkit/plugins/npapi/plugin_utils.cc
-@@ -45,7 +45,8 @@ void CreateVersionFromString(const base::string16& version_string,
- }
- 
- bool NPAPIPluginsSupported() {
--#if defined(OS_WIN) || defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(USE_AURA))
-+//#if defined(OS_WIN) || defined(OS_MACOSX) || (defined(OS_LINUX) && !defined(USE_AURA))
-+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
-   return true;
- #else
-   return false;
 diff --git a/webkit/plugins/npapi/webplugin_delegate_impl_aura.cc b/webkit/plugins/npapi/webplugin_delegate_impl_aura.cc
 index ba91bf9..958e82b 100644
 --- a/webkit/plugins/npapi/webplugin_delegate_impl_aura.cc
