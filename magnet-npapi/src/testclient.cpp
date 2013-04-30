@@ -27,7 +27,7 @@ int test_join_public_channel () {
 	MagnetSetListener (listener);
 
 	MagnetStart ();
-	bool ret = MagnetJoinChannel("meshmedia");
+	bool ret = MagnetJoinChannel("MESH_MEDIA_CHANNEL");
 
     	getchar();
 

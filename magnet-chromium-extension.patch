@@ -1,9 +1,9 @@
 diff --git a/chrome/browser/extensions/api/magnet/magnet_api.cc b/chrome/browser/extensions/api/magnet/magnet_api.cc
 new file mode 100644
-index 0000000..1623d53
+index 0000000..40d4a3d
 --- /dev/null
 +++ b/chrome/browser/extensions/api/magnet/magnet_api.cc
-@@ -0,0 +1,491 @@
+@@ -0,0 +1,516 @@
 +// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -398,6 +398,7 @@ index 0000000..1623d53
 +namespace Initialize = extensions::api::magnet::Initialize;
 +namespace SendData = extensions::api::magnet::SendData;
 +namespace Join = extensions::api::magnet::Join;
++namespace JoinedChannels = extensions::api::magnet::JoinedChannels;
 +
 +namespace extensions {
 +
@@ -494,13 +495,37 @@ index 0000000..1623d53
 +    return true;
 +}
 +
++
++bool MagnetJoinedChannelsFunction::RunImpl() {
++
++    // callback OnJoinedChannelsCallback = void (DOMString[] channelList);
++    // static void joinedChannels(OnJoinedChannelsCallback callback);
++
++    std::vector<std::string> args;
++
++    size_t num_channels = 0;
++    char** channelList = ::MagnetGetJoinedChannels(&num_channels);
++
++    for(size_t idx = 0; idx < num_channels; idx++)
++    {
++        std::string channel(channelList[idx]);
++        args.push_back(channel);
++    }
++
++    ::MagnetFreeChannels(channelList, num_channels);
++
++    results_ = JoinedChannels::Results::Create(args);
++
++    return true;
++}
++
 +}  // namespace extensions
 diff --git a/chrome/browser/extensions/api/magnet/magnet_api.h b/chrome/browser/extensions/api/magnet/magnet_api.h
 new file mode 100644
-index 0000000..5819ac2
+index 0000000..d370410
 --- /dev/null
 +++ b/chrome/browser/extensions/api/magnet/magnet_api.h
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,90 @@
 +
 +#ifndef CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
 +#define CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
@@ -577,6 +602,17 @@ index 0000000..5819ac2
 +  virtual bool RunImpl() OVERRIDE;
 +};
 +
++class MagnetJoinedChannelsFunction : public SyncExtensionFunction {
++ public:
++  DECLARE_EXTENSION_FUNCTION("magnet.joinedChannels", MAGNET_JOINEDCHANNELS)
++
++ protected:
++  virtual ~MagnetJoinedChannelsFunction() {}
++
++  // ExtensionFunction:
++  virtual bool RunImpl() OVERRIDE;
++};
++
 +}  // namespace extensions
 +
 +#endif  // CHROME_BROWSER_EXTENSIONS_API_MAGNET_MAGNET_API_H_
@@ -614,16 +650,17 @@ index 9667ea0..b5a0865 100644
  
  }  // namespace extensions
 diff --git a/chrome/browser/extensions/extension_function_histogram_value.h b/chrome/browser/extensions/extension_function_histogram_value.h
-index a6e6023..2d8dfc0 100644
+index a6e6023..faf5040 100644
 --- a/chrome/browser/extensions/extension_function_histogram_value.h
 +++ b/chrome/browser/extensions/extension_function_histogram_value.h
-@@ -500,6 +500,9 @@ enum HistogramValue {
+@@ -500,6 +500,10 @@ enum HistogramValue {
    WALLPAPERPRIVATE_RESETWALLPAPER,
    DEVELOPERPRIVATE_PERMISSIONS,
    WEBSTOREPRIVATE_ENABLEAPPLAUNCHER,
 +  MAGNET_INITIALIZE,
 +  MAGNET_SENDDATA,
 +  MAGNET_JOIN,
++  MAGNET_JOINEDCHANNELS,
    ENUM_BOUNDARY // Last entry: Add new entries above.
  };
  
@@ -713,16 +750,18 @@ index a89e95c..ee7e326 100644
            'media_galleries.idl',
 diff --git a/chrome/common/extensions/api/magnet.idl b/chrome/common/extensions/api/magnet.idl
 new file mode 100644
-index 0000000..64be503
+index 0000000..04f5da8
 --- /dev/null
 +++ b/chrome/common/extensions/api/magnet.idl
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,38 @@
 +// Magnet API
 +
 +// An API for managing magnet data over a mesh
 +namespace magnet {
 +
 +  callback OnMagnetCallback = void (boolean result, DOMString error);
++
++  callback OnJoinedChannelsCallback = void (DOMString[] channelList);
 +
 +  interface Functions {
 +
@@ -734,6 +773,9 @@ index 0000000..64be503
 +
 +    // Sends data to channel
 +    static void sendData(DOMString toNode, DOMString toChannel, DOMString dataType, DOMString data, OnMagnetCallback callback);
++
++    // Gets the list of channels that we are currently joined to
++    static void joinedChannels(OnJoinedChannelsCallback callback);
 +  };
 +
 +  interface Events {
